@@ -13,11 +13,12 @@ ALLOWED_KEYS = {
     "disabled",
     "type",
     "required",
+    "field_ref",
+    "category",
     "personal_values_included",
     "confidential_values_included",
     "authentication_values_included"
 }
-
 
 class PrivacyViolation(Exception):
     pass

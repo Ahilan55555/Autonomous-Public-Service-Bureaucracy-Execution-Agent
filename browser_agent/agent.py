@@ -64,7 +64,8 @@ class BrowserAgent:
 
         # 1. Observe the current browser state.
         before_observation = self.observer.observe()
-
+        self.executor.register_observation(before_observation)
+        
         # 2. Ask the model to select one action.
         action = self.decision_engine.decide(
             task=task,

@@ -2,7 +2,7 @@ from browser_agent.security.privacy_guard import (
     validate_llm_payload,
     PrivacyViolation
 )
-
+import re
 
 class OutboundPolicyError(Exception):
     """Raised when webpage data violates outbound security rules."""
@@ -22,6 +22,12 @@ FORBIDDEN_INPUT_TYPES = {
     "password",
     "file",
     "hidden",
+}
+FIELD_REF_PATTERN = re.compile(r"field_\d{4}")
+
+ALLOWED_FIELD_CATEGORIES = {
+    "PUBLIC",
+    "PERSONAL"
 }
 
 
@@ -198,7 +204,9 @@ def build_outbound_payload(sanitized_observation):
         })
 
     # Validate input fields.
+    # Validate input fields.
     safe_fields = []
+    seen_references = set()
 
     for field in input_fields:
 
@@ -207,26 +215,52 @@ def build_outbound_payload(sanitized_observation):
                 "Invalid input field"
             )
 
-        if set(field.keys()) != {
+        expected_field_keys = {
+            "field_ref",
+            "category",
             "type",
             "required",
             "disabled"
-        }:
+        }
+
+        if set(field.keys()) != expected_field_keys:
             raise OutboundPolicyError(
                 "Unexpected input field metadata"
             )
 
-        # Validate and normalize input type.
+        field_ref = field["field_ref"]
+
+        if (
+            not isinstance(field_ref, str)
+            or not FIELD_REF_PATTERN.fullmatch(field_ref)
+        ):
+            raise OutboundPolicyError(
+                "Invalid field reference"
+            )
+
+        if field_ref in seen_references:
+            raise OutboundPolicyError(
+                "Duplicate field reference"
+            )
+
+        seen_references.add(field_ref)
+
+        category = field["category"]
+
+        if category not in ALLOWED_FIELD_CATEGORIES:
+            raise OutboundPolicyError(
+                "Invalid field category"
+            )
+
         input_type = _validate_string(
             field["type"],
             "input type",
             30
         ).strip().lower()
 
-        # Reject sensitive input types.
         if input_type in FORBIDDEN_INPUT_TYPES:
             raise OutboundPolicyError(
-                f"Sensitive input type is not allowed: {input_type}"
+                "Sensitive input type is not allowed"
             )
 
         if not isinstance(field["required"], bool):
@@ -240,6 +274,8 @@ def build_outbound_payload(sanitized_observation):
             )
 
         safe_fields.append({
+            "field_ref": field_ref,
+            "category": category,
             "type": input_type,
             "required": field["required"],
             "disabled": field["disabled"]

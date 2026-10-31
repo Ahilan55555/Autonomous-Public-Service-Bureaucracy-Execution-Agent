@@ -38,11 +38,12 @@ class SecurityTests(unittest.TestCase):
             "input_fields": [
 
                 {
+                    "field_ref": "field_0001",
                     "type": "text",
                     "name": "search",
                     "required": False,
                     "disabled": False
-                },
+                },  
 
                 {
                     "type": "text",

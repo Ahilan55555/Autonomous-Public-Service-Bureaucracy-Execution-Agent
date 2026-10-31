@@ -1,6 +1,17 @@
 from browser_agent.security.schema_validator import validate_action
 from browser_agent.security.action_validator import authorize_action
 
+from browser_agent.execution.field_registry import (
+    FieldRegistry,
+    FieldRegistryError,
+)
+
+from browser_agent.execution.form_filler import (
+    FormFiller,
+    FormFillerError,
+)
+
+from browser_agent.execution.value_provider import LocalValueProvider
 
 class ExecutionError(Exception):
     """Raised when a browser action cannot be safely executed."""
@@ -9,12 +20,37 @@ class ExecutionError(Exception):
 
 class BrowserExecutor:
 
-    def __init__(self, page, allowed_domains):
+    def __init__(self, page, allowed_domains, value_provider=None):
+
         if page is None:
             raise ExecutionError("A valid Playwright page is required")
 
+        if value_provider is not None and not isinstance(
+            value_provider, LocalValueProvider
+        ):
+            raise ExecutionError("Invalid local value provider")
+
         self.page = page
         self.allowed_domains = allowed_domains
+
+        self.field_registry = FieldRegistry(page)
+        self.value_provider = value_provider
+
+        self.form_filler = (
+            FormFiller(self.field_registry, value_provider)
+            if value_provider is not None
+            else None
+        )
+
+    def register_observation(self, observation):
+
+        try:
+            self.field_registry.register(observation)
+
+        except FieldRegistryError as error:
+            raise ExecutionError(
+                "Could not register observed form fields"
+            ) from error
 
     def _find_unique_element(self, target):
         """
@@ -118,6 +154,31 @@ class BrowserExecutor:
                 "status": "user_interaction_required",
                 "action": action_name,
                 "target": action["target"]
+            }
+
+        if action_name == "fill":
+
+            if self.form_filler is None:
+                raise ExecutionError(
+                    "Local form filling is not configured"
+                )
+
+            try:
+                result = self.form_filler.fill(
+                    field_ref=action["target"],
+                    value_ref=action["parameters"]["value_ref"]
+                )
+
+            except FormFillerError as error:
+                raise ExecutionError(
+                    "Form filling failed"
+                ) from error
+
+            return {
+                "status": "executed",
+                "action": "fill",
+                "field_ref": result["field_ref"],
+                "verified": result["verified"],
             }
 
         if action_name != "click":

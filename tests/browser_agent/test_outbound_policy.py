@@ -34,6 +34,8 @@ class OutboundPolicyTests(unittest.TestCase):
 
             "input_fields": [
                 {
+                    "field_ref": "field_0001",
+                    "category": "PUBLIC",
                     "type": "text",
                     "required": True,
                     "disabled": False

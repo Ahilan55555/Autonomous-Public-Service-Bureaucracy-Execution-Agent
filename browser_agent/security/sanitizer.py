@@ -1,32 +1,22 @@
 import re
 
-from browser_agent.security.data_classifier import (
-    classify_field
-)
+from browser_agent.security.data_classifier import classify_field
 
 
-# Additional defense against accidentally exposed identifiers.
 SENSITIVE_PATTERNS = [
-
-    # Indian Aadhaar-like 12-digit identifiers
     re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"),
-
-    # Indian PAN-like identifiers
     re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE),
-
-    # Email addresses
     re.compile(
         r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
         re.IGNORECASE
     ),
-
-    # Phone numbers
     re.compile(r"\b(?:\+91[\s-]?)?[6-9]\d{9}\b"),
 ]
 
+FIELD_REF_PATTERN = re.compile(r"field_\d{4}")
+
 
 def sanitize_text(text):
-
     if not isinstance(text, str):
         return ""
 
@@ -40,32 +30,46 @@ def sanitize_text(text):
 
 def sanitize_observation(observation):
     """
-    Create a restricted observation for external LLM use.
+    Build a privacy-preserving observation for external LLM use.
 
-    Input field values are never included.
-    Sensitive field metadata is not exposed.
+    PUBLIC and PERSONAL fields receive opaque references.
+    CONFIDENTIAL and NEVER_SEND fields are excluded.
+    Actual values and identifying metadata never leave the browser.
     """
 
     safe_fields = []
 
     for field in observation.get("input_fields", []):
 
+        if not isinstance(field, dict):
+            continue
+
         classification = classify_field(field)
 
-        if classification != "PUBLIC":
+        if classification not in {"PUBLIC", "PERSONAL"}:
+            continue
+
+        field_ref = field.get("field_ref")
+
+        # Fail closed if the field reference is invalid.
+        if not isinstance(field_ref, str):
+            continue
+
+        if not FIELD_REF_PATTERN.fullmatch(field_ref):
             continue
 
         safe_fields.append({
-            "type": field.get("type", "text"),
+            "field_ref": field_ref,
+            "category": classification,
+            "type": sanitize_text(
+                field.get("type", "text")
+            ).lower(),
             "required": bool(field.get("required", False)),
             "disabled": bool(field.get("disabled", False))
         })
 
     return {
-
-        "title": sanitize_text(
-            observation.get("title", "")
-        ),
+        "title": sanitize_text(observation.get("title", "")),
 
         "headings": [
             sanitize_text(item)
@@ -79,6 +83,7 @@ def sanitize_observation(observation):
                 "disabled": bool(button.get("disabled", False))
             }
             for button in observation.get("buttons", [])
+            if isinstance(button, dict)
         ][:50],
 
         "links": [
@@ -87,6 +92,7 @@ def sanitize_observation(observation):
                 "visible": bool(link.get("visible", False))
             }
             for link in observation.get("links", [])
+            if isinstance(link, dict)
         ][:50],
 
         "input_fields": safe_fields,
