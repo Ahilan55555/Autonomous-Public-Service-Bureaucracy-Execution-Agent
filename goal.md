@@ -455,3 +455,54 @@ Verification module = Reliability mechanism.
 User = Authority over confidential information and consequential actions.
 
 **Primary objective: Build a privacy-first, state-aware browser automation agent that can understand websites, complete tasks, recognize missing information, request human assistance and recover from failures without exposing confidential user data.**
+
+## 13. Cross-Platform Compatibility
+
+### Target Platforms
+- Windows
+- Linux
+- macOS
+- Android
+- iOS
+- Tablets
+
+### Architecture Strategy
+
+Use a platform-independent architecture.
+
+1. React frontend must be responsive across desktop and mobile devices.
+2. FastAPI must expose platform-independent APIs.
+3. Playwright must support Windows, Linux and macOS browser execution.
+4. Remote browser execution must allow mobile users to control automation sessions.
+5. Browser configuration must adapt to the execution environment.
+6. File paths must use platform-independent Python utilities.
+7. Avoid OS-specific hardcoded paths.
+8. Browser sessions must support secure user interaction.
+9. Document uploads must work across supported devices.
+10. Task states must persist independently of the user's device.
+
+### Deployment Modes
+
+**Mode 1: Local Execution**
+- Browser agent runs on the user's computer.
+- Supports Windows, Linux and macOS.
+- Local document processing.
+
+**Mode 2: Remote Execution**
+- Browser agent runs on a remote server.
+- Users access it through the React frontend.
+- Supports desktop, mobile and tablet clients.
+- Secure remote browser interaction.
+
+### Future Expansion
+
+- Android native application integration.
+- iOS native application integration.
+- Appium-based native application automation.
+- Offline document processing where supported.
+
+### Cross-Platform Principle
+
+The browser agent's core logic must remain independent of the operating system and user interface.
+
+The same task execution engine should work regardless of whether the user accesses the system through a desktop, tablet or smartphone.

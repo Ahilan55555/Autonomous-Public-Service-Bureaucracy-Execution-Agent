@@ -44,6 +44,7 @@ def main():
             print("-", field)
 
         print("\nObservation successful!")
+        input("\nPress ENTER to close the browser...")
 
     finally:
 
