@@ -12,6 +12,12 @@ class TaskManager:
         self.current_task = None
         self.history = []
 
+    def mark_step_limit_reached(self):
+        if self.current_task is None:
+            raise TaskManagerError("No active task")
+
+        self.current_task["status"] = "step_limit_reached"
+
     def start_task(self, description):
 
         if not isinstance(description, str) or not description.strip():

@@ -42,14 +42,14 @@ class BrowserAgent:
 
         return self.observer.navigate(url)
 
-    def start_task(self):
+    def start_task(self, description):
 
         if self.task_manager.current_task is not None:
             raise BrowserAgentError("A task is already active")
 
         self.recovery.reset()
 
-        return self.task_manager.start_task("browser_task")
+        return self.task_manager.start_task(description)
 
     def run_step(self, task):
 
@@ -58,7 +58,7 @@ class BrowserAgent:
 
         # Start task tracking if necessary.
         if self.task_manager.current_task is None:
-            self.start_task()
+            self.start_task(task)
 
         task_id = self.task_manager.current_task["task_id"]
 
@@ -188,6 +188,94 @@ class BrowserAgent:
                 else None
             ),
             "task_status": self.task_manager.current_task["status"]
+        }
+
+    def run_task(self, task, max_steps=10):
+
+        if self.executor is None:
+            raise BrowserAgentError("Agent has not started")
+
+        if not isinstance(max_steps, int) or isinstance(max_steps, bool):
+            raise BrowserAgentError("max_steps must be an integer")
+
+        if not 1 <= max_steps <= 20:
+            raise BrowserAgentError("max_steps must be between 1 and 20")
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrowserAgentError("Task description is required")
+
+        if self.task_manager.current_task is not None:
+            raise BrowserAgentError("Another task is already active")
+
+        self.start_task(task)
+
+        task_id = self.task_manager.current_task["task_id"]
+        step_results = []
+
+        for step_number in range(1, max_steps + 1):
+
+            try:
+                result = self.run_step(task)
+            except Exception:
+                self.task_manager.fail_task()
+
+                return {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "reason": "An unexpected agent error occurred",
+                    "steps_completed": len(step_results),
+                }
+
+            step_results.append(result)
+
+            # Stop if the model explicitly ends the task.
+            if result.get("task_status") == "completed":
+                return {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            # Stop when human intervention is needed.
+            if result.get("task_status") == "awaiting_user":
+                return {
+                    "task_id": task_id,
+                    "status": "awaiting_user",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            # Stop when execution fails.
+            if result.get("result", {}).get("status") == "failed":
+                self.task_manager.fail_task()
+
+                return {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            # Do not continue when verification is uncertain.
+            verification = result.get("verification")
+
+            if verification and verification.get("status") == "uncertain":
+                return {
+                    "task_id": task_id,
+                    "status": "awaiting_user",
+                    "reason": "Action outcome could not be verified",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+        self.task_manager.mark_step_limit_reached()
+
+        return {
+            "task_id": task_id,
+            "status": "step_limit_reached",
+            "steps_completed": len(step_results),
+            "results": step_results,
         }
 
     def close(self):

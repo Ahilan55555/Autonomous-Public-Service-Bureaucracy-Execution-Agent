@@ -11,6 +11,16 @@ class TaskManagerTests(unittest.TestCase):
     def setUp(self):
         self.manager = TaskManager()
 
+    def test_mark_step_limit_reached(self):
+        self.manager.start_task("Test task")
+
+        self.manager.mark_step_limit_reached()
+
+        self.assertEqual(
+            self.manager.get_current_task()["status"],
+            "step_limit_reached"
+        )
+
     def test_start_task(self):
 
         task_id = self.manager.start_task("Test browser workflow")
