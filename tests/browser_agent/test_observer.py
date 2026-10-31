@@ -3,8 +3,9 @@ from browser_agent.perception.observer import BrowserObserver
 
 def main():
 
-    observer = BrowserObserver()
-
+    observer = BrowserObserver(
+        allowed_domains=["example.com"]
+    )
     try:
 
         print("\nStarting browser...")

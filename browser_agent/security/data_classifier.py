@@ -61,6 +61,30 @@ def normalize(value):
         str(value).lower()
     ).strip("_")
 
+def contains_keyword(metadata, keywords):
+    """
+    Match complete normalized tokens or phrases.
+    Avoid accidental substring matches.
+    """
+
+    tokens = re.findall(r"[a-z0-9]+", metadata.lower())
+
+    for keyword in keywords:
+        keyword_tokens = re.findall(
+            r"[a-z0-9]+",
+            normalize(keyword)
+        )
+
+        size = len(keyword_tokens)
+
+        if not size:
+            continue
+
+        for index in range(len(tokens) - size + 1):
+            if tokens[index:index + size] == keyword_tokens:
+                return True
+
+    return False
 
 def classify_field(field):
     """
@@ -70,7 +94,7 @@ def classify_field(field):
     """
 
     field_type = normalize(field.get("type"))
-    
+
     metadata = " ".join([
         normalize(field.get("name")),
         normalize(field.get("id")),
@@ -83,13 +107,13 @@ def classify_field(field):
     if field_type in {"password", "file", "hidden"}:
         return "NEVER_SEND"
 
-    if any(keyword in metadata for keyword in AUTHENTICATION_KEYWORDS):
+    if contains_keyword(metadata, AUTHENTICATION_KEYWORDS):
         return "NEVER_SEND"
 
-    if any(keyword in metadata for keyword in CONFIDENTIAL_KEYWORDS):
+    if contains_keyword(metadata, CONFIDENTIAL_KEYWORDS):
         return "CONFIDENTIAL"
 
-    if any(keyword in metadata for keyword in PERSONAL_KEYWORDS):
+    if contains_keyword(metadata, PERSONAL_KEYWORDS):
         return "PERSONAL"
 
     return "PUBLIC"

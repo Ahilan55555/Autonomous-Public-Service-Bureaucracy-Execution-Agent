@@ -98,6 +98,42 @@ class SecurityTests(unittest.TestCase):
             "PUBLIC"
         )
 
+    def test_username_is_not_misclassified_as_personal_name(self):
+        self.assertEqual(
+            classify_field({"type": "text", "name": "username"}),
+            "PUBLIC"
+        )
+
+
+    def test_personal_name_variations_are_classified(self):
+        fields = [
+            {"name": "full_name"},
+            {"name": "first_name"},
+            {"name": "last_name"},
+        ]
+
+        for field in fields:
+            with self.subTest(field=field):
+                self.assertEqual(
+                    classify_field(field),
+                    "PERSONAL"
+                )
+
+
+    def test_authentication_metadata_is_never_send(self):
+        fields = [
+            {"name": "verification_code"},
+            {"name": "security_code"},
+            {"name": "one_time_password"},
+        ]
+
+        for field in fields:
+            with self.subTest(field=field):
+                self.assertEqual(
+                    classify_field(field),
+                    "NEVER_SEND"
+                )
+
     def test_sensitive_values_are_excluded(self):
 
         safe_data = sanitize_observation(
