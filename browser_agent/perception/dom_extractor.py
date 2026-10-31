@@ -30,18 +30,35 @@ def extract_input_fields(page: Page):
     return page.locator(
         "input, textarea, select"
     ).evaluate_all("""
-        elements => elements.map(element => ({
+        elements => elements.map((element, index) => ({
+            field_ref: `field_${String(index + 1).padStart(4, "0")}`,
+
             tag: element.tagName.toLowerCase(),
+
             type: element.getAttribute("type") || "text",
+
             name: element.getAttribute("name"),
+
             id: element.id,
-            label: element.getAttribute("aria-label"),
+
+            label: (
+                Array.from(element.labels || [])
+                    .map(label => label.innerText.trim())
+                    .filter(Boolean)
+                    .join(" ")
+                || element.getAttribute("aria-label")
+                || ""
+            ),
+
             placeholder: element.getAttribute("placeholder"),
+
+            autocomplete: element.getAttribute("autocomplete"),
+
             required: element.required,
+
             disabled: element.disabled
         }))
     """)
-
 
 def extract_dom(page: Page):
 
