@@ -9,7 +9,11 @@ from browser_agent.integration.field_mapper import (
     validate_mapping,
 )
 from browser_agent.perception.observer import BrowserObserver
-from browser_agent.security.sanitizer import sanitize_observation
+from browser_agent.security.data_classifier import classify_field
+from browser_agent.security.sanitizer import (
+    sanitize_observation,
+    sanitize_text,
+)
 from browser_agent.security.outbound_policy import build_outbound_payload
 
 
@@ -37,49 +41,77 @@ def main():
     print("[2] Service request validated.")
     print("Service:", safe_request["service_name"])
 
-    print("\n[3] Starting browser...")
-
     observer = BrowserObserver(
         allowed_domains=ALLOWED_DOMAINS
     )
 
     try:
+        print("\n[3] Starting browser...")
         page = observer.start()
 
         print("[4] Opening Parivahan...")
-        result = observer.navigate(PORTAL_URL)
-        print("Navigation:", result)
+        navigation = observer.navigate(PORTAL_URL)
+        print("Navigation:", navigation)
 
         page.wait_for_timeout(3000)
 
-        print("\n[5] Extracting webpage structure...")
+        print("\n[5] Extracting webpage...")
         raw_observation = observer.observe()
 
-        print("DOM extraction completed.")
-
-        print("\n[6] Sanitizing webpage information...")
+        print("\n[6] Sanitizing webpage...")
         sanitized = sanitize_observation(raw_observation)
 
-        # Strict outbound policy validation.
         outbound = build_outbound_payload(sanitized)
 
-        print("Privacy validation passed.")
-
-        visible_fields = [
+        # Only labels belonging to fields already approved by
+        # the sanitizer and outbound policy are considered.
+        visible_refs = {
             field["field_ref"]
             for field in outbound["input_fields"]
-        ]
+        }
 
-        print("Visible safe field references:", len(visible_fields))
+        field_labels = []
 
-        print("\n[7] Building Gemini mapping request...")
+        for field in raw_observation.get("input_fields", []):
+            field_ref = field.get("field_ref")
+
+            if field_ref not in visible_refs:
+                continue
+
+            if classify_field(field) not in {"PUBLIC", "PERSONAL"}:
+                continue
+
+            label = (
+                field.get("label")
+                or field.get("placeholder")
+                or field.get("name")
+                or field.get("id")
+                or ""
+            )
+
+            field_labels.append({
+                "field_ref": field_ref,
+                "label": sanitize_text(label),
+                "type": sanitize_text(
+                    field.get("type", "text")
+                ),
+                "required": bool(field.get("required", False)),
+                "disabled": bool(field.get("disabled", False)),
+            })
+
+        print("Privacy validation passed.")
+        print("Visible field references:", len(visible_refs))
+        print("Safe field labels:", len(field_labels))
+
+        print("\n[7] Building Gemini prompt...")
 
         prompt = build_mapping_prompt(
             safe_request,
-            outbound
+            outbound,
+            field_labels,
         )
 
-        print("\n[8] Requesting Gemini mapping proposal...")
+        print("\n[8] Requesting Gemini mapping...")
 
         client = genai.Client(
             api_key=os.environ["GEMINI_API_KEY"]
@@ -99,30 +131,30 @@ def main():
 
         proposal = json.loads(response.text)
 
-        print("\nGemini proposal received.")
-
-        print("\n[9] Validating proposal locally...")
+        print("\n[9] Validating mapping...")
 
         validated = validate_mapping(
             proposal,
             safe_request["form_field_names"],
-            visible_fields,
+            visible_refs,
         )
 
         print("\n========== MAPPING REPORT ==========")
-
         print("Service:", safe_request["service_name"])
-        print("Proposed mappings:", len(validated))
+        print("Mappings:", len(validated))
 
         print(json.dumps(validated, indent=2))
 
         print("\nApplicant values sent to Gemini: NO")
-        print("Document URLs sent to Gemini: NO")
-        print("Form fields filled: NO")
         print("Documents uploaded: NO")
         print("Application submitted: NO")
 
-        print("\nSUCCESS: Mapping demonstration completed.")
+        if not validated:
+            print("\nNo reliable mappings found.")
+            print("Navigate to the actual application form first.")
+        else:
+            print("\nMapping proposal successfully validated.")
+            print("All proposed mappings require human approval.")
 
     finally:
         observer.close()
