@@ -21,6 +21,7 @@ def extract_links(page: Page):
             .filter(element => element.innerText.trim())
             .map(element => ({
                 text: element.innerText.trim(),
+                href: element.href,
                 visible: element.getClientRects().length > 0
             }))
     """)

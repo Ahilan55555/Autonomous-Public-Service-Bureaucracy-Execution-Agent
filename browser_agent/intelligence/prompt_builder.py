@@ -45,10 +45,8 @@ SECURITY RULES:
 
 ALLOWED ACTIONS:
 
-- navigate
 - click
 - fill
-- wait
 - request_user_input
 - request_approval
 - stop
@@ -71,19 +69,38 @@ ACTION PARAMETERS:
 
 - navigate: {}
 - click: {}
-- fill: {"value_ref": "user_profile.full_name"}
+- fill: {"value_ref": "applicant_name"}
 - wait: {"timeout_ms": 1000}
 - request_user_input: {}
 - request_approval: {}
 - stop: {}
 
-For fill actions, use only a local value reference.
-Never include the actual personal value.
+For fill actions:
 
-The target and reason must be non-empty strings.
+1. target must be an exact field_ref from the observation.
+2. value_ref must be one of:
+   - applicant_name
+   - date_of_birth
+   - email
+   - phone
+   - address
+   - registration_number
+   - chassis_number
+   - engine_number
+   - reason_for_duplicate
+   - mobile_number
+   - full_name
+   - state
+   - district
+   - grievance_description
 
-The Python application independently validates and authorizes every action.
-Your output is a proposal, not permission to execute it.
+3. Never invent field references.
+4. Never invent value references.
+5. Never include actual personal values in responses.
+6. Never request or fill passwords, OTPs, authentication tokens,
+   or payment credentials.
+7. Use only the reference names provided above.
+8. If information is insufficient, request user input.
 """.strip()
 
 

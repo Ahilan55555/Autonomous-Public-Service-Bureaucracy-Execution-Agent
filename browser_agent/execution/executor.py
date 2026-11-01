@@ -1,6 +1,8 @@
 from browser_agent.security.schema_validator import validate_action
-from browser_agent.security.action_validator import authorize_action
-
+from browser_agent.security.action_validator import (
+    authorize_action,
+    ApprovalRequiredError,
+)
 from browser_agent.execution.field_registry import (
     FieldRegistry,
     FieldRegistryError,
@@ -20,8 +22,13 @@ class ExecutionError(Exception):
 
 class BrowserExecutor:
 
-    def __init__(self, page, allowed_domains, value_provider=None):
-
+    def __init__(
+        self,
+        page,
+        allowed_domains,
+        value_provider=None,
+        allow_local_test_server=False
+    ):
         if page is None:
             raise ExecutionError("A valid Playwright page is required")
 
@@ -32,7 +39,7 @@ class BrowserExecutor:
 
         self.page = page
         self.allowed_domains = allowed_domains
-
+        self.allow_local_test_server = allow_local_test_server
         self.field_registry = FieldRegistry(page)
         self.value_provider = value_provider
 
@@ -128,8 +135,18 @@ class BrowserExecutor:
                 action,
                 allowed_domains=self.allowed_domains,
                 current_url=self.page.url,
-                user_approved=user_approved
+                user_approved=user_approved,
+                allow_local_test_server=self.allow_local_test_server
             )
+
+        except ApprovalRequiredError:
+            return {
+                "status": "user_interaction_required",
+                "action": action["action"],
+                "target": action["target"],
+                "reason": "explicit_user_approval_required"
+            }
+
         except Exception as error:
             raise ExecutionError(
                 "Action authorization failed"

@@ -82,7 +82,12 @@ class BrowserObserver:
             # Blocking service workers improves route interception
             # consistency for this security-sensitive workflow.
             self.context = self.browser.new_context(
-                service_workers="block"
+                service_workers="block",
+                ignore_https_errors=getattr(
+                    self,
+                    "ignore_https_errors",
+                    False
+                )
             )
 
             # Install the policy once for this entire context.

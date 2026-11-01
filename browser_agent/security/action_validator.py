@@ -69,20 +69,20 @@ def _host_is_allowed(hostname, allowed_domains):
     return False
 
 
-def _validate_https_url(url, allowed_domains):
-    """Validate HTTPS and enforce the configured domain allowlist."""
+def _validate_https_url(
+    url,
+    allowed_domains,
+    allow_local_test_server=False
+):
+    """Validate HTTPS URLs and enforce the configured domain allowlist."""
 
     if not isinstance(url, str):
-        raise ActionAuthorizationError(
-            "URL must be a string"
-        )
+        raise ActionAuthorizationError("URL must be a string")
 
     try:
         parsed = urlparse(url)
     except ValueError as error:
-        raise ActionAuthorizationError(
-            "Invalid URL"
-        ) from error
+        raise ActionAuthorizationError("Invalid URL") from error
 
     if parsed.scheme.lower() != "https":
         raise ActionAuthorizationError(
@@ -94,7 +94,7 @@ def _validate_https_url(url, allowed_domains):
             "URL must contain a hostname"
         )
 
-    if parsed.username or parsed.password:
+    if parsed.username is not None or parsed.password is not None:
         raise ActionAuthorizationError(
             "URLs containing embedded credentials are forbidden"
         )
@@ -106,18 +106,28 @@ def _validate_https_url(url, allowed_domains):
             "Invalid URL port"
         ) from error
 
-    if port not in (None, 443):
+    hostname = parsed.hostname.lower().rstrip(".")
+
+    local_test_url = (
+        allow_local_test_server is True
+        and hostname == "127.0.0.1"
+        and port == 8000
+    )
+
+    if port not in (None, 443) and not local_test_url:
         raise ActionAuthorizationError(
             "Non-standard HTTPS ports are forbidden"
         )
 
-    if not _host_is_allowed(parsed.hostname, allowed_domains):
+    if not local_test_url and not _host_is_allowed(
+        hostname,
+        allowed_domains
+    ):
         raise ActionAuthorizationError(
             "Domain is not in the approved allowlist"
         )
 
-    return parsed.hostname.lower()
-
+    return hostname
 
 def _validate_fill_reference(value_ref):
     """Reject references that point to sensitive information."""
@@ -135,6 +145,7 @@ def authorize_action(
     allowed_domains,
     current_url=None,
     user_approved=False,
+    allow_local_test_server=False,
 ):
     """
     Authorize a schema-validated action.
@@ -172,12 +183,13 @@ def authorize_action(
             "requires_approval": False,
         }
 
-    # Navigation must use an explicitly approved HTTPS domain.
+    
+    # Navigation must validate the destination URL, not the current page.
     if action_name == "navigate":
-
         _validate_https_url(
             target,
-            allowed_domains
+            allowed_domains,
+            allow_local_test_server=allow_local_test_server
         )
 
     else:
@@ -189,7 +201,8 @@ def authorize_action(
 
         _validate_https_url(
             current_url,
-            allowed_domains
+            allowed_domains,
+            allow_local_test_server=allow_local_test_server
         )
 
     # Sensitive local data references are prohibited.
@@ -199,11 +212,11 @@ def authorize_action(
             action["parameters"]["value_ref"]
         )
 
-    # Final submission and other consequential actions require approval.
-    requires_approval = (
-        action_name == "click"
-        and bool(CONSEQUENTIAL_TARGET_PATTERN.search(target))
-    )
+    
+    # Require explicit approval for all form filling and clicks.
+    # A button's visible label alone cannot establish whether
+    # clicking it has consequential effects.
+    requires_approval = action_name in {"fill", "click"}
 
     if requires_approval and not user_approved:
         raise ApprovalRequiredError(

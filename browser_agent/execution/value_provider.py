@@ -11,11 +11,23 @@ class LocalValueProvider:
     """
 
     ALLOWED_REFERENCES = {
+        # Existing references
         "applicant_name",
         "date_of_birth",
         "email",
         "phone",
         "address",
+
+        # Duplicate RC service references
+        "registration_number",
+        "chassis_number",
+        "engine_number",
+        "reason_for_duplicate",
+        "mobile_number",
+        "full_name",
+        "state",
+        "district",
+        "grievance_description",
     }
 
     def __init__(self, values=None, approved_references=None):
@@ -46,7 +58,37 @@ class LocalValueProvider:
             raise ValueProviderError(
                 "Unsupported local value reference"
             )
+    @classmethod
+    def from_service_payload(cls, payload, approved_references=None):
+        """
+        Create a local value provider from an incoming service request.
 
+        Approval must be supplied explicitly. Receiving service data
+        does not automatically authorize filling form fields.
+        """
+
+        if not isinstance(payload, dict):
+            raise ValueProviderError("Invalid service payload")
+
+        form_payload = payload.get("form_payload")
+
+        if not isinstance(form_payload, dict):
+            raise ValueProviderError("Missing or invalid form_payload")
+
+        if not set(form_payload).issubset(cls.ALLOWED_REFERENCES):
+            raise ValueProviderError("Unsupported service form field")
+
+        for key, value in form_payload.items():
+            if not isinstance(value, str):
+                raise ValueProviderError(
+                    "Service form values must be strings"
+                )
+
+        return cls(
+            values=form_payload,
+            approved_references=approved_references or set(),
+        )
+        
     def resolve(self, reference):
 
         if not isinstance(reference, str):
