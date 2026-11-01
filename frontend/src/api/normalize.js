@@ -212,8 +212,8 @@ export function normalizeService(data) {
     capabilities: Array.isArray(data.capabilities)
       ? data.capabilities
       : typeof data.capabilities === "string" && data.capabilities.trim()
-      ? [data.capabilities.trim()]
-      : [],
+        ? [data.capabilities.trim()]
+        : [],
     eligibility_rules: data.eligibility_rules && typeof data.eligibility_rules === "object" ? data.eligibility_rules : {},
     required_documents: Array.isArray(data.required_documents) ? data.required_documents : [],
     eligibility: data.eligibility ? normalizeEligibilityResponse(data.eligibility) : null,
@@ -276,8 +276,8 @@ export function normalizeEvaluatedScheme(item) {
     capabilities: Array.isArray(item.capabilities)
       ? item.capabilities
       : typeof item.capabilities === "string" && item.capabilities.trim()
-      ? [item.capabilities.trim()]
-      : baseService.capabilities || [],
+        ? [item.capabilities.trim()]
+        : baseService.capabilities || [],
     eligibility: item.eligibility ? normalizeEligibilityResponse(item.eligibility) : null,
   };
 }

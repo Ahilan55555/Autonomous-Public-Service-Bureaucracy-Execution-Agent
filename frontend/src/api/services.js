@@ -20,6 +20,8 @@ import {
   normalizeHealthCheck,
   formatToIsoDob,
 } from "./normalize.js";
+import { validateVaultFile } from "../utils/vaultValidation.js";
+
 
 // ==========================================
 // 1. HEALTH CHECK
@@ -71,8 +73,8 @@ export const profileApi = {
         data.annual_family_income !== undefined && data.annual_family_income !== null && data.annual_family_income !== ""
           ? Number(data.annual_family_income)
           : data.annualFamilyIncome !== undefined && data.annualFamilyIncome !== null && data.annualFamilyIncome !== ""
-          ? Number(data.annualFamilyIncome)
-          : 0,
+            ? Number(data.annualFamilyIncome)
+            : 0,
       phone_number: data.phone_number || data.phoneNumber || "",
     };
 
@@ -254,6 +256,10 @@ export const documentsApi = {
   async uploadDocument(file, documentType) {
     if (!file) {
       throw new Error("Please select a valid file to upload.");
+    }
+    const validation = validateVaultFile(file);
+    if (!validation.valid) {
+      throw new Error(validation.error);
     }
     if (!documentType || !documentType.trim()) {
       throw new Error("Please specify the document type.");

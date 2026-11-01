@@ -22,15 +22,27 @@ import {
   Trash2,
   Lock,
   AlertTriangle,
+  UploadCloud,
+  FileImage,
+  Shield,
+  Check,
 } from "lucide-react";
 
 import { healthApi, documentsApi } from "../api/services";
 import BackendStatusModal from "../components/BackendStatusModal";
+import {
+  validateVaultFile,
+  formatBytes,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_LABEL,
+} from "../utils/vaultValidation";
 import "../App.css";
 
 export default function DocumentVaultPage() {
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window !== "undefined" ? window.innerWidth > 850 : true));
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth > 850 : true
+  );
   const [profile] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("citizenProfile") || "{}");
@@ -39,7 +51,8 @@ export default function DocumentVaultPage() {
     }
   });
 
-  const userName = profile.full_name || localStorage.getItem("user_name") || "Citizen";
+  const userName =
+    profile.full_name || localStorage.getItem("user_name") || "Citizen";
   const [backendOnline, setBackendOnline] = useState(true);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
 
@@ -55,7 +68,12 @@ export default function DocumentVaultPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const [uploadSuccess, setUploadSuccess] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Stored Documents Filtering & Search
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
 
   // Interactive Modals
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -74,8 +92,6 @@ export default function DocumentVaultPage() {
     "Bank Passbook",
     "Other",
   ];
-
-  const allowedFormats = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
 
   useEffect(() => {
     let isMounted = true;
@@ -117,8 +133,7 @@ export default function DocumentVaultPage() {
     }
   }
 
-  function handleFileSelect(e) {
-    const file = e.target.files?.[0];
+  function processSelectedFile(file) {
     setUploadError(null);
     setUploadSuccess(null);
 
@@ -127,27 +142,57 @@ export default function DocumentVaultPage() {
       return;
     }
 
-    if (file.size === 0) {
-      setUploadError("The selected file is empty. Please choose a valid file.");
+    // Strict 1 MB file size and format validation
+    const validation = validateVaultFile(file);
+    if (!validation.valid) {
+      setUploadError(validation.error);
       setSelectedFile(null);
-      return;
-    }
-
-    // Format validation
-    if (!allowedFormats.includes(file.type.toLowerCase()) && !/\.(pdf|jpg|jpeg|png)$/i.test(file.name)) {
-      setUploadError("Unsupported format. Please select a PDF, JPEG, or PNG document.");
-      setSelectedFile(null);
-      return;
-    }
-
-    // 25MB file size limit
-    if (file.size > 25 * 1024 * 1024) {
-      setUploadError("File size exceeds 25MB limit. Please upload a smaller document.");
-      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
 
     setSelectedFile(file);
+  }
+
+  function handleFileSelect(e) {
+    const file = e.target.files?.[0];
+    processSelectedFile(file);
+  }
+
+  function handleClearFile(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSelectedFile(null);
+    setUploadError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      processSelectedFile(file);
+    }
   }
 
   async function handleUpload(e) {
@@ -160,7 +205,17 @@ export default function DocumentVaultPage() {
       return;
     }
 
-    const typeToUse = documentType === "Other" ? customDocType.trim() : documentType;
+    // Strict validation before submission
+    const validation = validateVaultFile(selectedFile);
+    if (!validation.valid) {
+      setUploadError(validation.error);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const typeToUse =
+      documentType === "Other" ? customDocType.trim() : documentType;
     if (!typeToUse) {
       setUploadError("Please specify a document category or type.");
       return;
@@ -169,7 +224,9 @@ export default function DocumentVaultPage() {
     setUploading(true);
     try {
       const res = await documentsApi.uploadDocument(selectedFile, typeToUse);
-      setUploadSuccess(`Successfully uploaded and verified ${res.original_filename || selectedFile.name}!`);
+      setUploadSuccess(
+        `Document "${res.original_filename || selectedFile.name}" was uploaded successfully to your vault!`
+      );
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await handleRefreshList();
@@ -194,14 +251,6 @@ export default function DocumentVaultPage() {
     }
   }
 
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-  }
-
   function toggleSidebar() {
     setSidebarOpen((prev) => !prev);
   }
@@ -217,6 +266,31 @@ export default function DocumentVaultPage() {
   }
 
   const isLoading = (documents === null && !listError) || isRefreshing;
+
+  // Filtered documents
+  const filteredDocuments = (documents || []).filter((doc) => {
+    const matchesCategory =
+      categoryFilter === "All" || doc.document_type === categoryFilter;
+    const matchesSearch =
+      !searchQuery.trim() ||
+      (doc.original_filename || "")
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase()) ||
+      (doc.document_type || "")
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
+  const isPdf =
+    selectedFile &&
+    (selectedFile.type === "application/pdf" ||
+      (selectedFile.name || "").toLowerCase().endsWith(".pdf"));
+
+  const isUploadDisabled =
+    uploading ||
+    !selectedFile ||
+    selectedFile.size > MAX_FILE_SIZE_BYTES;
 
   return (
     <div className="dashboard">
@@ -266,7 +340,9 @@ export default function DocumentVaultPage() {
 
           <NavLink
             to="/schemes-catalog"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `sidebar-link ${isActive ? "active" : ""}`
+            }
             onClick={() => {
               if (typeof window !== "undefined" && window.innerWidth <= 850) {
                 setSidebarOpen(false);
@@ -279,7 +355,9 @@ export default function DocumentVaultPage() {
 
           <NavLink
             to="/search-discovery"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `sidebar-link ${isActive ? "active" : ""}`
+            }
             onClick={() => {
               if (typeof window !== "undefined" && window.innerWidth <= 850) {
                 setSidebarOpen(false);
@@ -292,7 +370,9 @@ export default function DocumentVaultPage() {
 
           <NavLink
             to="/document-vault"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `sidebar-link ${isActive ? "active" : ""}`
+            }
             onClick={() => {
               if (typeof window !== "undefined" && window.innerWidth <= 850) {
                 setSidebarOpen(false);
@@ -305,7 +385,9 @@ export default function DocumentVaultPage() {
 
           <NavLink
             to="/my-applications"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `sidebar-link ${isActive ? "active" : ""}`
+            }
             onClick={() => {
               if (typeof window !== "undefined" && window.innerWidth <= 850) {
                 setSidebarOpen(false);
@@ -332,7 +414,9 @@ export default function DocumentVaultPage() {
         <nav className="sidebar-nav">
           <NavLink
             to="/my-profile"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              `sidebar-link ${isActive ? "active" : ""}`
+            }
             onClick={() => {
               if (typeof window !== "undefined" && window.innerWidth <= 850) {
                 setSidebarOpen(false);
@@ -412,7 +496,8 @@ export default function DocumentVaultPage() {
               }}
             >
               <Wifi size={14} color={backendOnline ? "#367c4b" : "#dc2626"} />
-              <span className="backend-btn-text">Backend: </span>{backendOnline ? "Online" : "Offline"}
+              <span className="backend-btn-text">Backend: </span>
+              {backendOnline ? "Online" : "Offline"}
             </button>
 
             <button
@@ -438,350 +523,594 @@ export default function DocumentVaultPage() {
           </div>
         </header>
 
-        {/* PAGE CONTENT */}
-        <div style={{ padding: "30px" }}>
-          {/* Upload New Document Card */}
-          <div className="dashboard-card" style={{ padding: "26px", marginBottom: "30px" }}>
-            <h2 style={{ fontSize: "18px", fontWeight: "800", margin: "0 0 6px" }}>
-              Upload New Document
-            </h2>
-            <p style={{ fontSize: "13px", color: "#666", margin: "0 0 20px" }}>
-              Upload verifiable credentials to auto-satisfy eligibility checks and manifest generation.
-            </p>
-
-            {uploadSuccess && (
-              <div
-                style={{
-                  padding: "12px 16px",
-                  borderRadius: "8px",
-                  background: "#e8fff0",
-                  border: "1px solid #a5efbd",
-                  color: "#16803c",
-                  fontSize: "13px",
-                  fontWeight: "650",
-                  marginBottom: "18px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <CheckCircle2 size={18} />
-                {uploadSuccess}
-              </div>
-            )}
-
-            {uploadError && (
-              <div className="auth-error" style={{ marginBottom: "18px" }}>
-                {uploadError}
-              </div>
-            )}
-
-            <form onSubmit={handleUpload}>
-              <div className="vault-upload-grid">
-                <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: "750", marginBottom: "6px" }}>
-                    Document Category / Type
-                  </label>
-                  <select
-                    value={documentType}
-                    onChange={(e) => setDocumentType(e.target.value)}
-                    disabled={uploading}
-                    style={{
-                      width: "100%",
-                      height: "46px",
-                      padding: "0 12px",
-                      borderRadius: "8px",
-                      border: "1px solid #ccc",
-                      fontSize: "13px",
-                      background: "#fff",
-                    }}
-                  >
-                    {documentTypes.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-
-                  {documentType === "Other" && (
-                    <input
-                      type="text"
-                      placeholder="Specify document name..."
-                      value={customDocType}
-                      onChange={(e) => setCustomDocType(e.target.value)}
-                      disabled={uploading}
-                      style={{
-                        width: "100%",
-                        height: "40px",
-                        marginTop: "8px",
-                        padding: "0 12px",
-                        borderRadius: "8px",
-                        border: "1px solid #ccc",
-                        fontSize: "13px",
-                      }}
-                    />
-                  )}
+        {/* PAGE CONTENT CONTAINER */}
+        <div style={{ padding: "26px 30px 40px" }}>
+          <div className="vault-container">
+            {/* SECURITY & TRUST BANNER */}
+            <div className="vault-banner">
+              <div className="vault-banner-left">
+                <div className="vault-banner-icon">
+                  <ShieldCheck size={24} />
                 </div>
-
                 <div>
-                  <label style={{ display: "block", fontSize: "13px", fontWeight: "750", marginBottom: "6px" }}>
-                    Select Document (PDF, JPEG, PNG)
-                  </label>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      height: "46px",
-                      padding: "0 12px",
-                      borderRadius: "8px",
-                      border: "1px dashed #bbb",
-                      background: "#f9faf9",
-                    }}
-                  >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                      onChange={handleFileSelect}
-                      disabled={uploading}
-                      style={{ fontSize: "12px", flex: 1 }}
-                    />
-                  </div>
-                  {selectedFile && (
-                    <div style={{ fontSize: "11px", color: "#367c4b", fontWeight: "600", marginTop: "4px" }}>
-                      Selected: {selectedFile.name} ({formatBytes(selectedFile.size)})
-                    </div>
-                  )}
+                  <h2 className="vault-banner-title">
+                    Tamper-Proof Citizen Credential Vault
+                  </h2>
+                  <p className="vault-banner-desc">
+                    Official documents are encrypted and used to auto-verify eligibility across public welfare schemes.
+                  </p>
                 </div>
               </div>
-
-              <button
-                type="submit"
-                disabled={uploading || !selectedFile}
-                style={{
-                  padding: "12px 24px",
-                  background: "#111",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontWeight: "750",
-                  fontSize: "13px",
-                  cursor: uploading || !selectedFile ? "not-allowed" : "pointer",
-                  opacity: uploading || !selectedFile ? 0.6 : 1,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                {uploading ? (
-                  <>
-                    <RefreshCw size={15} className="spin-animation" />
-                    Encrypting & Storing in Vault...
-                  </>
-                ) : (
-                  <>
-                    <Upload size={15} />
-                    Upload to Vault
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
-
-          {/* Stored Documents Section */}
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <div>
-                <h2 style={{ fontSize: "18px", fontWeight: "800", margin: 0 }}>
-                  Stored Documents ({documents ? documents.length : 0})
-                </h2>
-                <p style={{ fontSize: "13px", color: "#777", margin: "4px 0 0" }}>
-                  Persistent credentials associated with your authenticated citizen account
-                </p>
+              <div className="vault-security-pill">
+                <Lock size={13} /> 256-Bit Encrypted &bull; Govt Verified
               </div>
-
-              <button
-                type="button"
-                onClick={handleRefreshList}
-                disabled={isLoading}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  background: "#f0fdf4",
-                  border: "1px solid #bbf7d0",
-                  padding: "8px 14px",
-                  borderRadius: "8px",
-                  color: "#166534",
-                  fontWeight: "750",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                }}
-              >
-                <RefreshCw size={14} className={isLoading ? "spin-animation" : ""} />
-                Refresh Vault
-              </button>
             </div>
 
-            {listError && (
-              <div className="auth-error" style={{ marginBottom: "16px" }}>
-                {listError}
+            {/* UPLOAD NEW DOCUMENT CARD */}
+            <div className="vault-upload-card">
+              <div className="vault-card-header">
+                <div>
+                  <h2 className="vault-card-title">
+                    <UploadCloud size={20} color="#166534" />
+                    Upload New Document
+                  </h2>
+                  <p className="vault-card-subtitle">
+                    Select a document category and choose a PDF, JPG, or PNG file under 1 MB.
+                  </p>
+                </div>
+                <div className="vault-limit-badge">
+                  <Shield size={13} color="#166534" />
+                  <span>
+                    Upload Limit: <strong>{MAX_FILE_SIZE_LABEL}</strong> (1,048,576 bytes)
+                  </span>
+                </div>
               </div>
-            )}
 
-            {isLoading && (
-              <div style={{ padding: "40px", textAlign: "center", background: "#fff", borderRadius: "14px", border: "1px solid #e5e7e5" }}>
-                <RefreshCw size={24} className="spin-animation" color="#367c4b" style={{ margin: "0 auto 10px" }} />
-                <div style={{ fontSize: "13px", color: "#666" }}>Retrieving encrypted citizen documents...</div>
-              </div>
-            )}
+              {/* SUCCESS NOTIFICATION */}
+              {uploadSuccess && (
+                <div className="vault-alert-success" role="alert">
+                  <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
+                  <div>{uploadSuccess}</div>
+                </div>
+              )}
 
-            {!isLoading && documents && documents.length === 0 && (
-              <div style={{ padding: "50px", textAlign: "center", background: "#fff", borderRadius: "14px", border: "1px solid #e5e7e5" }}>
-                <FolderOpen size={42} color="#999" style={{ margin: "0 auto 12px" }} />
-                <h3 style={{ fontSize: "16px", fontWeight: "750", margin: "0 0 6px" }}>Your Vault is Empty</h3>
-                <p style={{ fontSize: "13px", color: "#777", margin: 0 }}>
-                  Upload your Aadhaar, Income Certificate, or educational marksheets above to qualify for scheme benefits.
-                </p>
-              </div>
-            )}
+              {/* ERROR NOTIFICATION */}
+              {uploadError && (
+                <div className="vault-alert-error" role="alert">
+                  <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>{uploadError}</div>
+                </div>
+              )}
 
-            {!isLoading && documents && documents.length > 0 && (
-              <div style={{ overflowX: "auto", background: "#fff", borderRadius: "12px", border: "1px solid #e5e7e5" }}>
-                <table className="civic-table">
-                  <thead>
-                    <tr>
-                      <th>Document Category</th>
-                      <th>Filename</th>
-                      <th>MIME Type</th>
-                      <th>Size</th>
-                      <th>Upload Date</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {documents.map((doc) => (
-                      <tr key={doc.id || doc.storage_path}>
-                        <td>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "4px 9px",
-                              borderRadius: "6px",
-                              background: "#e8f8ed",
-                              color: "#16803c",
-                              fontSize: "11px",
-                              fontWeight: "750",
-                            }}
-                          >
-                            {doc.document_type}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight: "650", color: "#222" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <FileText size={16} color="#555" />
-                            {doc.original_filename}
+              <form onSubmit={handleUpload}>
+                <div className="vault-form-grid">
+                  {/* Category Selection Column */}
+                  <div className="vault-form-col">
+                    <div>
+                      <label className="vault-label">
+                        <span>Document Category / Type</span>
+                        <span className="vault-label-required">Required</span>
+                      </label>
+                      <select
+                        value={documentType}
+                        onChange={(e) => setDocumentType(e.target.value)}
+                        disabled={uploading}
+                        className="vault-select"
+                      >
+                        {documentTypes.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+
+                      {documentType === "Other" && (
+                        <input
+                          type="text"
+                          placeholder="Specify custom document type..."
+                          value={customDocType}
+                          onChange={(e) => setCustomDocType(e.target.value)}
+                          disabled={uploading}
+                          className="vault-input"
+                          style={{ marginTop: "10px" }}
+                        />
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "10px",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        fontSize: "12px",
+                        color: "#475569",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <strong style={{ color: "#1e293b", display: "block", marginBottom: "3px" }}>
+                        Verification Notice:
+                      </strong>
+                      Uploaded credentials are parsed by the AI Verification Engine to automatically qualify your citizen profile for direct scheme benefits.
+                    </div>
+                  </div>
+
+                  {/* File Selection & Dropzone Column */}
+                  <div className="vault-form-col">
+                    <div>
+                      <div className="vault-label">
+                        <span>Select Document</span>
+                        <span style={{ fontSize: "11px", color: "#64748b" }}>
+                          PDF, JPG, or PNG (Max 1 MB)
+                        </span>
+                      </div>
+
+                      {/* Hidden File Input */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                        onChange={handleFileSelect}
+                        disabled={uploading}
+                        style={{ display: "none" }}
+                        id="vault-file-input"
+                      />
+
+                      {/* Dynamic File Dropzone / Selected File Card */}
+                      {!selectedFile ? (
+                        <div
+                          className={`vault-dropzone ${isDragging ? "dragging" : ""}`}
+                          onClick={() => fileInputRef.current?.click()}
+                          onDragOver={handleDragOver}
+                          onDragLeave={handleDragLeave}
+                          onDrop={handleDrop}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              fileInputRef.current?.click();
+                            }
+                          }}
+                          aria-label="Upload document file input dropzone"
+                        >
+                          <div className="vault-dropzone-icon">
+                            <UploadCloud size={24} />
                           </div>
-                        </td>
-                        <td style={{ fontSize: "12px", color: "#666" }}>{doc.mime_type || "document"}</td>
-                        <td style={{ fontSize: "12px" }}>{formatBytes(doc.file_size_bytes)}</td>
-                        <td style={{ fontSize: "12px", color: "#666" }}>
-                          {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "-"}
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "6px" }}>
-                            {/* View / Preview Button */}
+                          <p className="vault-dropzone-title">
+                            <span>Click to browse</span> or drag and drop your file here
+                          </p>
+                          <p className="vault-dropzone-hint">
+                            Maximum allowed file size: <strong>1 MB</strong> &bull; Supported formats: <strong>PDF, JPG, PNG</strong>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="vault-selected-card">
+                          <div className="vault-selected-info">
+                            <div
+                              className={`vault-selected-file-icon ${
+                                isPdf ? "pdf" : "image"
+                              }`}
+                            >
+                              {isPdf ? <FileText size={20} /> : <FileImage size={20} />}
+                            </div>
+                            <div className="vault-selected-meta">
+                              <div className="vault-selected-name" title={selectedFile.name}>
+                                {selectedFile.name}
+                              </div>
+                              <div className="vault-selected-sub">
+                                <span>{formatBytes(selectedFile.size)}</span>
+                                <span className="vault-valid-pill">
+                                  <Check size={11} /> Size OK (&le; 1 MB)
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="vault-selected-actions">
                             <button
                               type="button"
-                              onClick={() => setPreviewDoc(doc)}
-                              title="Preview document"
+                              className="vault-btn-remove"
+                              onClick={handleClearFile}
+                              title="Remove selected file"
+                              disabled={uploading}
+                            >
+                              <X size={14} /> Remove
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploading}
                               style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                padding: "6px 10px",
-                                borderRadius: "6px",
-                                background: "#f3f4f6",
+                                padding: "6px 12px",
+                                borderRadius: "8px",
                                 border: "1px solid #d1d5db",
-                                color: "#111",
-                                fontSize: "11px",
+                                background: "#ffffff",
+                                color: "#374151",
+                                fontSize: "12px",
                                 fontWeight: "700",
                                 cursor: "pointer",
                               }}
                             >
-                              <Eye size={13} /> View
-                            </button>
-
-                            {/* Download Button */}
-                            {doc.signed_url ? (
-                              <a
-                                href={doc.signed_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                download={doc.original_filename}
-                                title="Download document"
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                  padding: "6px 10px",
-                                  borderRadius: "6px",
-                                  background: "#111",
-                                  color: "#fff",
-                                  fontSize: "11px",
-                                  fontWeight: "700",
-                                  textDecoration: "none",
-                                }}
-                              >
-                                <Download size={13} /> Download
-                              </a>
-                            ) : (
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "3px",
-                                  fontSize: "11px",
-                                  color: "#777",
-                                  padding: "6px 8px",
-                                }}
-                              >
-                                <Lock size={12} /> Stored
-                              </span>
-                            )}
-
-                            {/* Delete Button */}
-                            <button
-                              type="button"
-                              onClick={() => setDocToDelete(doc)}
-                              title="Delete document"
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                padding: "6px 8px",
-                                borderRadius: "6px",
-                                background: "#fee2e2",
-                                border: "1px solid #fca5a5",
-                                color: "#991b1b",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Trash2 size={13} />
+                              Change
                             </button>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Footer Action */}
+                <div className="vault-form-footer">
+                  <div className="vault-form-info-note">
+                    <ShieldCheck size={16} color="#16a34a" />
+                    <span>
+                      Files are cryptographically checksummed and validated against strict 1 MB security limits.
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isUploadDisabled}
+                    className="vault-btn-primary"
+                  >
+                    {uploading ? (
+                      <>
+                        <RefreshCw size={15} className="spin-animation" />
+                        Encrypting & Storing in Vault...
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={15} />
+                        Upload to Vault
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* STORED DOCUMENTS SECTION */}
+            <div>
+              <div className="vault-stored-header">
+                <div>
+                  <div className="vault-stored-title-group">
+                    <h2 style={{ fontSize: "19px", fontWeight: "800", margin: 0, color: "#111827" }}>
+                      Stored Documents
+                    </h2>
+                    <span className="vault-count-badge">
+                      {documents ? documents.length : 0}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: "13px", color: "#64748b", margin: "4px 0 0" }}>
+                    Persistent verifiable credentials associated with your authenticated citizen account.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {documents && documents.length > 0 && (
+                    <>
+                      <select
+                        value={categoryFilter}
+                        onChange={(e) => setCategoryFilter(e.target.value)}
+                        style={{
+                          height: "36px",
+                          padding: "0 10px",
+                          borderRadius: "8px",
+                          border: "1px solid #d1d5db",
+                          fontSize: "12px",
+                          background: "#fff",
+                          color: "#374151",
+                          fontWeight: "650",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <option value="All">All Categories</option>
+                        {documentTypes.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div style={{ position: "relative" }}>
+                        <Search
+                          size={14}
+                          color="#94a3b8"
+                          style={{ position: "absolute", left: "10px", top: "11px" }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Search files..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          style={{
+                            height: "36px",
+                            paddingLeft: "30px",
+                            paddingRight: "10px",
+                            borderRadius: "8px",
+                            border: "1px solid #d1d5db",
+                            fontSize: "12px",
+                            width: "150px",
+                          }}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleRefreshList}
+                    disabled={isLoading}
+                    className="vault-btn-refresh"
+                  >
+                    <RefreshCw
+                      size={14}
+                      className={isLoading ? "spin-animation" : ""}
+                    />
+                    Refresh Vault
+                  </button>
+                </div>
               </div>
-            )}
+
+              {listError && (
+                <div className="vault-alert-error" style={{ marginBottom: "16px" }}>
+                  <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                  <div>{listError}</div>
+                </div>
+              )}
+
+              {/* LOADING STATE */}
+              {isLoading && (
+                <div
+                  style={{
+                    padding: "48px 24px",
+                    textAlign: "center",
+                    background: "#ffffff",
+                    borderRadius: "16px",
+                    border: "1px solid #e5e7e5",
+                    boxShadow: "0 2px 14px rgba(0,0,0,0.03)",
+                  }}
+                >
+                  <RefreshCw
+                    size={28}
+                    className="spin-animation"
+                    color="#16803c"
+                    style={{ margin: "0 auto 12px" }}
+                  />
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#1f2937" }}>
+                    Retrieving Encrypted Citizen Documents...
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                    Synchronizing tamper-evident credentials from the vault server.
+                  </div>
+                </div>
+              )}
+
+              {/* EMPTY STATE */}
+              {!isLoading && documents && documents.length === 0 && (
+                <div className="vault-empty-card">
+                  <div className="vault-empty-icon-wrap">
+                    <FolderOpen size={32} />
+                  </div>
+                  <h3
+                    style={{
+                      fontSize: "17px",
+                      fontWeight: "800",
+                      color: "#111827",
+                      margin: "0 0 6px",
+                    }}
+                  >
+                    Your Document Vault is Empty
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "#64748b",
+                      maxWidth: "460px",
+                      margin: "0 auto 18px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Upload your Identity Proof, Income Certificate, or Academic Marksheets above. Uploaded files must be under 1 MB and formatted as PDF, JPG, or PNG.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="vault-btn-primary"
+                    style={{ margin: "0 auto" }}
+                  >
+                    <Upload size={14} /> Select Document to Upload
+                  </button>
+                </div>
+              )}
+
+              {/* FILTER EMPTY STATE */}
+              {!isLoading && documents && documents.length > 0 && filteredDocuments.length === 0 && (
+                <div
+                  style={{
+                    padding: "36px 20px",
+                    textAlign: "center",
+                    background: "#fff",
+                    borderRadius: "14px",
+                    border: "1px solid #e5e7e5",
+                  }}
+                >
+                  <Search size={28} color="#94a3b8" style={{ margin: "0 auto 8px" }} />
+                  <p style={{ fontSize: "14px", fontWeight: "700", color: "#334155", margin: "0 0 4px" }}>
+                    No matching documents found
+                  </p>
+                  <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>
+                    Try clearing the search query or selecting a different category filter.
+                  </p>
+                </div>
+              )}
+
+              {/* DOCUMENTS DATA TABLE */}
+              {!isLoading && filteredDocuments.length > 0 && (
+                <div className="vault-table-container">
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="civic-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: "20%" }}>Category</th>
+                          <th style={{ width: "35%" }}>Document Name</th>
+                          <th style={{ width: "15%" }}>MIME Type</th>
+                          <th style={{ width: "12%" }}>Size</th>
+                          <th style={{ width: "18%", textAlign: "right" }}>
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDocuments.map((doc) => {
+                          const docIsPdf =
+                            (doc.mime_type || "").includes("pdf") ||
+                            (doc.original_filename || "")
+                              .toLowerCase()
+                              .endsWith(".pdf");
+
+                          return (
+                            <tr key={doc.id || doc.storage_path}>
+                              <td>
+                                <span className="vault-category-pill">
+                                  {doc.document_type}
+                                </span>
+                              </td>
+                              <td>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "10px",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: "30px",
+                                      height: "30px",
+                                      borderRadius: "8px",
+                                      background: docIsPdf ? "#fee2e2" : "#e0e7ff",
+                                      color: docIsPdf ? "#dc2626" : "#4f46e5",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {docIsPdf ? (
+                                      <FileText size={16} />
+                                    ) : (
+                                      <FileImage size={16} />
+                                    )}
+                                  </div>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div
+                                      style={{
+                                        fontWeight: "750",
+                                        color: "#111827",
+                                        fontSize: "13px",
+                                        whiteSpace: "nowrap",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        maxWidth: "260px",
+                                      }}
+                                      title={doc.original_filename}
+                                    >
+                                      {doc.original_filename}
+                                    </div>
+                                    <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+                                      {doc.created_at
+                                        ? new Date(doc.created_at).toLocaleDateString()
+                                        : "Stored in Vault"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ fontSize: "12px", color: "#64748b" }}>
+                                {doc.mime_type || "application/octet-stream"}
+                              </td>
+                              <td style={{ fontSize: "12px", fontWeight: "650", color: "#334155" }}>
+                                {formatBytes(doc.file_size_bytes)}
+                              </td>
+                              <td>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "flex-end",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
+                                >
+                                  {/* View / Preview Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewDoc(doc)}
+                                    title="Preview document"
+                                    className="vault-action-btn-view"
+                                  >
+                                    <Eye size={13} /> View
+                                  </button>
+
+                                  {/* Download Button */}
+                                  {doc.signed_url ? (
+                                    <a
+                                      href={doc.signed_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download={doc.original_filename}
+                                      title="Download document"
+                                      className="vault-action-btn-download"
+                                    >
+                                      <Download size={13} /> Download
+                                    </a>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "3px",
+                                        fontSize: "11px",
+                                        color: "#94a3b8",
+                                        padding: "6px 8px",
+                                      }}
+                                    >
+                                      <Lock size={12} /> Stored
+                                    </span>
+                                  )}
+
+                                  {/* Delete Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setDocToDelete(doc)}
+                                    title="Delete document"
+                                    className="vault-action-btn-delete"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>
 
       {/* DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
-        <div className="civic-modal-backdrop" onClick={() => setPreviewDoc(null)} role="dialog" aria-modal="true">
+        <div
+          className="civic-modal-backdrop"
+          onClick={() => setPreviewDoc(null)}
+          role="dialog"
+          aria-modal="true"
+        >
           <div
             className="civic-modal-card civic-modal-large"
             onClick={(e) => e.stopPropagation()}
@@ -793,38 +1122,78 @@ export default function DocumentVaultPage() {
                   <FileText size={20} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "800" }}>{previewDoc.original_filename}</h3>
+                  <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "800" }}>
+                    {previewDoc.original_filename}
+                  </h3>
                   <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#666" }}>
-                    Category: {previewDoc.document_type} &bull; Size: {formatBytes(previewDoc.file_size_bytes)}
+                    Category: {previewDoc.document_type} &bull; Size:{" "}
+                    {formatBytes(previewDoc.file_size_bytes)}
                   </p>
                 </div>
               </div>
-              <button className="civic-modal-close" onClick={() => setPreviewDoc(null)} aria-label="Close preview">
+              <button
+                className="civic-modal-close"
+                onClick={() => setPreviewDoc(null)}
+                aria-label="Close preview"
+              >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="civic-modal-body" style={{ minHeight: "350px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div
+              className="civic-modal-body"
+              style={{
+                minHeight: "350px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
               {previewDoc.signed_url ? (
-                previewDoc.mime_type?.includes("image") || /\.(jpg|jpeg|png)$/i.test(previewDoc.original_filename) ? (
+                previewDoc.mime_type?.includes("image") ||
+                /\.(jpg|jpeg|png)$/i.test(previewDoc.original_filename) ? (
                   <img
                     src={previewDoc.signed_url}
                     alt={previewDoc.original_filename}
-                    style={{ maxWidth: "100%", maxHeight: "500px", borderRadius: "8px", objectFit: "contain" }}
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: "500px",
+                      borderRadius: "8px",
+                      objectFit: "contain",
+                    }}
                   />
                 ) : (
                   <iframe
                     src={previewDoc.signed_url}
                     title={previewDoc.original_filename}
-                    style={{ width: "100%", height: "480px", border: "1px solid #e5e7e5", borderRadius: "8px" }}
+                    style={{
+                      width: "100%",
+                      height: "480px",
+                      border: "1px solid #e5e7e5",
+                      borderRadius: "8px",
+                    }}
                   />
                 )
               ) : (
                 <div style={{ textAlign: "center", padding: "40px" }}>
-                  <Lock size={40} color="#367c4b" style={{ margin: "0 auto 12px" }} />
-                  <h4 style={{ fontSize: "16px", fontWeight: "750", margin: "0 0 6px" }}>Encrypted Private Document</h4>
-                  <p style={{ fontSize: "13px", color: "#666", maxWidth: "420px", margin: "0 auto" }}>
-                    This document is stored securely in the citizen vault and verified for government eligibility checks.
+                  <Lock
+                    size={40}
+                    color="#367c4b"
+                    style={{ margin: "0 auto 12px" }}
+                  />
+                  <h4 style={{ fontSize: "16px", fontWeight: "750", margin: "0 0 6px" }}>
+                    Encrypted Citizen Document
+                  </h4>
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "#666",
+                      maxWidth: "420px",
+                      margin: "0 auto",
+                    }}
+                  >
+                    This document is stored securely in the vault and verified for government eligibility checks.
                   </p>
                 </div>
               )}
@@ -837,18 +1206,8 @@ export default function DocumentVaultPage() {
                   download={previewDoc.original_filename}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "9px 16px",
-                    borderRadius: "8px",
-                    background: "#166534",
-                    color: "#fff",
-                    fontWeight: "750",
-                    fontSize: "12px",
-                    textDecoration: "none",
-                  }}
+                  className="vault-action-btn-download"
+                  style={{ padding: "9px 16px", fontSize: "12px" }}
                 >
                   <Download size={14} /> Download File
                 </a>
@@ -876,19 +1235,46 @@ export default function DocumentVaultPage() {
 
       {/* CONFIRM DELETE MODAL */}
       {docToDelete && (
-        <div className="civic-modal-backdrop" onClick={() => setDocToDelete(null)} role="dialog" aria-modal="true">
-          <div className="civic-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "450px" }}>
+        <div
+          className="civic-modal-backdrop"
+          onClick={() => setDocToDelete(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="civic-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "450px" }}
+          >
             <div className="civic-modal-header">
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "10px",
+                    background: "#fee2e2",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
                   <AlertTriangle size={18} color="#991b1b" />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800" }}>Delete Document</h3>
-                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#666" }}>Confirmation required</p>
+                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800" }}>
+                    Delete Document
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#666" }}>
+                    Confirmation required
+                  </p>
                 </div>
               </div>
-              <button className="civic-modal-close" onClick={() => setDocToDelete(null)} aria-label="Close">
+              <button
+                className="civic-modal-close"
+                onClick={() => setDocToDelete(null)}
+                aria-label="Close"
+              >
                 <X size={18} />
               </button>
             </div>

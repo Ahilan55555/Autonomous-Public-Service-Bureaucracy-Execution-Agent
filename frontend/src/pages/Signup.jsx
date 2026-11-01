@@ -8,12 +8,15 @@ import {
   Eye,
   EyeOff,
   CheckCircle,
+  CheckCircle2,
+  XCircle,
   UserRound,
   RefreshCw,
   Wifi,
 } from "lucide-react";
 import { authApi } from "../api/services";
 import BackendStatusModal from "../components/BackendStatusModal";
+import { validatePassword, validateEmail } from "../utils/password";
 import "../App.css";
 
 function Signup() {
@@ -38,19 +41,37 @@ function Signup() {
     }));
   };
 
+  // Real-time evaluation of each password requirement
+  const { isValid: isPasswordValid, results: passwordRuleResults } = validatePassword(formData.password);
+  const hasTypedPassword = formData.password.length > 0;
+
+  const hasTypedConfirm = formData.confirmPassword.length > 0;
+  const isConfirmMatch = formData.confirmPassword === formData.password;
+  const isConfirmValid = hasTypedConfirm && isConfirmMatch;
+
+  const isEmailValid = validateEmail(formData.email);
+
+  const isFormValid = isEmailValid && isPasswordValid && isConfirmValid;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
     const { email, password, confirmPassword } = formData;
+    const cleanEmail = email.trim();
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+    if (!cleanEmail || !isEmailValid) {
+      setError("Please enter a valid email address.");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Password should have at least 6 characters.");
+    if (!isPasswordValid) {
+      setError("Password must satisfy all 5 strength requirements.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -58,11 +79,11 @@ function Signup() {
 
     try {
       // 1. Register with backend
-      await authApi.register(email.trim(), password);
+      await authApi.register(cleanEmail, password);
 
       // 2. Log in automatically to acquire JWT Bearer token for profile creation
       try {
-        const loginRes = await authApi.login(email.trim(), password);
+        const loginRes = await authApi.login(cleanEmail, password);
         if (loginRes?.access_token) {
           localStorage.setItem("access_token", loginRes.access_token);
           localStorage.setItem("user_id", String(loginRes.user_id));
@@ -72,7 +93,7 @@ function Signup() {
         // If auto-login fails, user can still log in manually
       }
 
-      localStorage.setItem("user_email", email.trim());
+      localStorage.setItem("user_email", cleanEmail);
 
       // Navigate to create-profile setup
       navigate("/create-profile");
@@ -113,7 +134,7 @@ function Signup() {
 
             <div className="illustration-badge badge-top">
               <CheckCircle size={15} />
-              Simple & Secure
+              Simple &amp; Secure
             </div>
 
             <div className="illustration-badge badge-bottom">
@@ -180,10 +201,11 @@ function Signup() {
           <form className="auth-form" onSubmit={handleSubmit}>
             {/* Email */}
             <div className="form-group">
-              <label>Email Address</label>
+              <label htmlFor="signup-email">Email Address</label>
               <div className="input-wrapper">
                 <Mail size={17} />
                 <input
+                  id="signup-email"
                   type="email"
                   name="email"
                   placeholder="you@example.com"
@@ -197,16 +219,16 @@ function Signup() {
 
             {/* Password */}
             <div className="form-group">
-              <label>Password</label>
+              <label htmlFor="signup-password">Password</label>
               <div className="input-wrapper">
                 <Lock size={17} />
                 <input
+                  id="signup-password"
                   type={showPassword ? "text" : "password"}
                   name="password"
-                  placeholder="Create a password"
+                  placeholder="Create a strong password"
                   value={formData.password}
                   onChange={handleChange}
-                  minLength={6}
                   disabled={isSubmitting}
                   required
                 />
@@ -219,14 +241,41 @@ function Signup() {
                   {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
+
+              {/* Real-time Password Requirements Checklist */}
+              <div className="password-requirements-card">
+                <div className="password-requirements-title">Password Requirements:</div>
+                {passwordRuleResults.map((rule) => {
+                  let statusClass = "unmet";
+                  let icon = <span style={{ fontSize: "11px", color: "#888" }}>○</span>;
+
+                  if (hasTypedPassword) {
+                    if (rule.passed) {
+                      statusClass = "valid";
+                      icon = <CheckCircle2 size={14} color="#16803c" />;
+                    } else {
+                      statusClass = "invalid";
+                      icon = <XCircle size={14} color="#dc2626" />;
+                    }
+                  }
+
+                  return (
+                    <div key={rule.id} className={`password-rule-item ${statusClass}`}>
+                      <div className="password-rule-icon">{icon}</div>
+                      <span>{rule.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Confirm Password */}
             <div className="form-group">
-              <label>Confirm Password</label>
+              <label htmlFor="signup-confirm-password">Confirm Password</label>
               <div className="input-wrapper">
                 <Lock size={17} />
                 <input
+                  id="signup-confirm-password"
                   type={showConfirmPassword ? "text" : "password"}
                   name="confirmPassword"
                   placeholder="Confirm your password"
@@ -244,11 +293,35 @@ function Signup() {
                   {showConfirmPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
               </div>
+
+              {/* Confirm Password Inline Match Status */}
+              {hasTypedConfirm && (
+                <div className={`confirm-password-status ${isConfirmMatch ? "match" : "mismatch"}`}>
+                  {isConfirmMatch ? (
+                    <>
+                      <CheckCircle2 size={13} color="#16803c" /> Passwords match
+                    </>
+                  ) : (
+                    <>
+                      <XCircle size={13} color="#dc2626" /> Passwords do not match
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             {error && <div className="auth-error">{error}</div>}
 
-            <button type="submit" className="auth-button" disabled={isSubmitting}>
+            <button
+              type="submit"
+              className="auth-button"
+              disabled={!isFormValid || isSubmitting}
+              title={
+                !isFormValid
+                  ? "Please fulfill all password requirements and ensure passwords match"
+                  : "Create Account"
+              }
+            >
               {isSubmitting ? (
                 <>
                   <RefreshCw size={18} className="spin-animation" />

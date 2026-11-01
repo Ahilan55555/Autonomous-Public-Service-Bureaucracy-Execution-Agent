@@ -500,17 +500,17 @@ function MyProfile() {
     // Do NOT submit hidden fields: send student fields ONLY for student, worker fields ONLY for worker
     const payload = isStudent
       ? {
-          ...commonPayload,
-          education_level: formData.education_level || null,
-          institution_name: formData.institution_name ? formData.institution_name.trim() : null,
-          course_or_degree: formData.course_or_degree ? formData.course_or_degree.trim() : null,
-        }
+        ...commonPayload,
+        education_level: formData.education_level || null,
+        institution_name: formData.institution_name ? formData.institution_name.trim() : null,
+        course_or_degree: formData.course_or_degree ? formData.course_or_degree.trim() : null,
+      }
       : {
-          ...commonPayload,
-          employment_type: formData.employment_type ? formData.employment_type.trim() : null,
-          industry_or_sector: formData.industry_or_sector ? formData.industry_or_sector.trim() : null,
-          employer_name: formData.employer_name ? formData.employer_name.trim() : null,
-        };
+        ...commonPayload,
+        employment_type: formData.employment_type ? formData.employment_type.trim() : null,
+        industry_or_sector: formData.industry_or_sector ? formData.industry_or_sector.trim() : null,
+        employer_name: formData.employer_name ? formData.employer_name.trim() : null,
+      };
 
     try {
       const updated = await apiClient(`/api/profile/${userId}`, {

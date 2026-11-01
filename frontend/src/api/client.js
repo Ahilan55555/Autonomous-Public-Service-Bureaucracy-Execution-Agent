@@ -26,20 +26,25 @@ export function formatErrorDetail(detail, fallbackMsg = "An error occurred") {
   }
 
   // FastAPI pydantic validation error array: [{ loc: ['body', 'query'], msg: '...', type: '...' }]
+  // or Django array of error messages: ["...", "..."]
   if (Array.isArray(detail)) {
     const formattedList = detail
       .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        let field = "";
-        if (Array.isArray(item.loc)) {
-          const parts = [...item.loc];
-          if (parts.length > 1 && (parts[0] === "body" || parts[0] === "query" || parts[0] === "path" || parts[0] === "header")) {
-            parts.shift();
+        if (!item) return null;
+        if (typeof item === "string") return item;
+        if (typeof item === "object") {
+          let field = "";
+          if (Array.isArray(item.loc)) {
+            const parts = [...item.loc];
+            if (parts.length > 1 && (parts[0] === "body" || parts[0] === "query" || parts[0] === "path" || parts[0] === "header")) {
+              parts.shift();
+            }
+            field = parts.join(".");
           }
-          field = parts.join(".");
+          const msg = item.msg || item.message || JSON.stringify(item);
+          return field ? `${field}: ${msg}` : msg;
         }
-        const msg = item.msg || "Invalid value";
-        return field ? `${field}: ${msg}` : msg;
+        return String(item);
       })
       .filter(Boolean);
 
@@ -48,7 +53,23 @@ export function formatErrorDetail(detail, fallbackMsg = "An error occurred") {
     }
   }
 
+  // Django REST Framework error dictionary: { password: ["..."], email: ["..."] } or { error: "..." }
   if (typeof detail === "object") {
+    const messages = [];
+    for (const [key, val] of Object.entries(detail)) {
+      if (Array.isArray(val)) {
+        const joined = val
+          .filter(Boolean)
+          .map((v) => (typeof v === "object" ? v.msg || JSON.stringify(v) : String(v)))
+          .join(", ");
+        messages.push(key === "non_field_errors" || key === "detail" ? joined : `${key}: ${joined}`);
+      } else if (typeof val === "string") {
+        messages.push(key === "error" || key === "detail" || key === "message" || key === "non_field_errors" ? val : `${key}: ${val}`);
+      }
+    }
+    if (messages.length > 0) {
+      return messages.join(" | ");
+    }
     try {
       return JSON.stringify(detail);
     } catch {
@@ -162,9 +183,20 @@ export async function apiClient(endpoint, options = {}) {
       let parsedMessage = "";
       let errorDetail = null;
 
-      if (responseData && typeof responseData === "object" && "detail" in responseData) {
-        errorDetail = responseData.detail;
-        parsedMessage = formatErrorDetail(errorDetail);
+      if (responseData && typeof responseData === "object") {
+        if ("detail" in responseData) {
+          errorDetail = responseData.detail;
+          parsedMessage = formatErrorDetail(errorDetail);
+        } else if ("error" in responseData) {
+          errorDetail = responseData.error;
+          parsedMessage = formatErrorDetail(errorDetail);
+        } else if ("message" in responseData) {
+          errorDetail = responseData.message;
+          parsedMessage = formatErrorDetail(errorDetail);
+        } else {
+          errorDetail = responseData;
+          parsedMessage = formatErrorDetail(errorDetail);
+        }
       } else if (typeof responseData === "string" && responseData.trim()) {
         parsedMessage = responseData;
       } else {
