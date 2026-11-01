@@ -1,0 +1,34 @@
+{
+  "service_id": 54,
+  "service_name": "Application for Duplicate Certificate of Registration",
+  "service_code": "TN_MORTH_RC_REISSUE",
+  "portal_url": "https://parivahan.gov.in",
+  "governance_tier": "state",
+  "ready_for_dispatch": true,
+  "missing_form_fields": [],
+  "missing_documents": [],
+  "form_payload": {
+    "registration_number": "TEST_REGISTRATION_001",
+    "chassis_number": "TEST_CHASSIS_001",
+    "engine_number": "TEST_ENGINE_001",
+    "reason_for_duplicate": "Lost original RC book",
+    "mobile_number": "9000000001",
+    "full_name": "Test Applicant",
+    "email": "test@example.invalid",
+    "state": "Tamil Nadu",
+    "district": "Tiruchirappalli",
+    "grievance_description": "Testing duplicate registration certificate workflow"
+  },
+  "file_attachments": [
+    {
+      "requirement": "First Information Report (FIR)",
+      "filename": "test_fir.pdf",
+      "local_path": "data/test_documents/test_fir.pdf"
+    },
+    {
+      "requirement": "Valid Insurance Policy",
+      "filename": "test_insurance.pdf",
+      "local_path": "data/test_documents/test_insurance.pdf"
+    }
+  ]
+}
