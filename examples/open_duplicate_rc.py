@@ -1,9 +1,15 @@
+import os
+import re
 import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# This live demo should be visible unless the caller explicitly opts into
+# headless mode.
+os.environ.setdefault("BROWSER_HEADLESS", "false")
 
 from browser_agent.perception.observer import BrowserObserver
 
@@ -37,6 +43,131 @@ def close_mobile_popup(page):
             ) from error
 
         print("[INFO] No visible mobile popup.")
+
+
+def close_authentication_modes_notice(page):
+    """Dismiss the portal's informational authentication notice."""
+
+    for dialog in page.get_by_role("dialog").all():
+        try:
+            if not dialog.is_visible():
+                continue
+
+            if "authentication modes" not in dialog.inner_text().lower():
+                continue
+
+            close_button = dialog.locator(".ui-dialog-titlebar-close")
+            if close_button.count() == 0:
+                raise RuntimeError(
+                    "Authentication notice has no close control."
+                )
+
+            close_button.click(timeout=5000)
+            dialog.wait_for(state="hidden", timeout=10000)
+            print("[OK] Authentication information notice closed.")
+            return
+
+        except Exception as error:
+            if "authentication modes" in dialog.inner_text().lower():
+                raise RuntimeError(
+                    f"Could not close authentication notice: {error}"
+                ) from error
+
+    print("[INFO] No authentication information notice is open.")
+
+
+def registration_rto_code(registration):
+    """Return the state and RTO code encoded in a standard plate number."""
+
+    normalized = re.sub(r"[\s-]", "", registration.upper())
+    match = re.match(r"^([A-Z]{2})(\d{1,2})", normalized)
+    if not match:
+        raise ValueError(
+            "Could not read a state and RTO code from that registration."
+        )
+
+    return match.group(1), int(match.group(2))
+
+
+def select_rto_from_registration(page, registration):
+    """Select an unambiguous RTO option matching the plate prefix."""
+
+    state_code, rto_number = registration_rto_code(registration)
+    rto_select = page.locator("#fit_c_office_to_input")
+
+    try:
+        page.wait_for_function(
+            "state => { const el = document.querySelector('#state_cd_input'); "
+            "return el && el.value === state; }",
+            arg=state_code,
+            timeout=12000,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            "VAHAN did not resolve the registration to its state. "
+            "The registration may be mistyped or unsupported."
+        ) from error
+
+    options = rto_select.locator("option").evaluate_all(
+        "items => items.map(item => ({value: item.value, "
+        "label: (item.textContent || '').trim()}))"
+    )
+
+    def matches_rto(label):
+        digits = re.findall(r"(?<!\d)0*(\d{1,2})(?!\d)", label)
+        return any(int(token) == rto_number for token in digits)
+
+    matches = [
+        option for option in options
+        if option["value"] != "-1" and matches_rto(option["label"])
+    ]
+
+    if len(matches) != 1:
+        available = [option["label"] for option in options if option["value"] != "-1"]
+        if available:
+            raise RuntimeError(
+                "Could not match the plate's RTO code to exactly one portal "
+                "option. Available RTO labels: " + ", ".join(available)
+            )
+        raise RuntimeError(
+            "VAHAN has not loaded RTO options for this registration. "
+            "The browser is being left open for review."
+        )
+
+    selected = matches[0]
+    menu = page.locator("#fit_c_office_to")
+    if "ui-state-disabled" in (menu.get_attribute("class") or ""):
+        raise RuntimeError(
+            "VAHAN has not enabled RTO selection for this registration."
+        )
+
+    menu.click(timeout=10000)
+    panel = page.locator("#fit_c_office_to_panel")
+    panel.wait_for(state="visible", timeout=10000)
+
+    items = panel.locator(".ui-selectonemenu-item")
+    chosen_item = None
+    for index in range(items.count()):
+        item = items.nth(index)
+        label = (item.get_attribute("data-label") or item.inner_text()).strip()
+        if label == selected["label"]:
+            chosen_item = item
+            break
+
+    if chosen_item is None:
+        raise RuntimeError(
+            "The matching RTO is present in the page data but not in the "
+            "visible selection list."
+        )
+
+    chosen_item.click(timeout=10000)
+    page.wait_for_timeout(1000)
+
+    selected_label = page.locator("#fit_c_office_to_label").inner_text().strip()
+    if selected_label != selected["label"]:
+        raise RuntimeError("VAHAN did not confirm the selected RTO.")
+
+    print("[OK] Matching registering authority selected.")
 
 
 def accept_privacy_notice(page):
@@ -122,11 +253,11 @@ def main():
         page.wait_for_timeout(3000)
 
         print("\n=== VAHAN DUPLICATE RC ===")
-        print("URL:", page.url)
         print("Title:", page.title())
 
         # STEP 2: CLOSE POPUP
         close_mobile_popup(page)
+        close_authentication_modes_notice(page)
 
         # STEP 3: ENTER REGISTRATION NUMBER
         registration_field = page.locator("#regnid")
@@ -145,39 +276,29 @@ def main():
             return
 
         registration_field.fill(registration)
+        registration_field.press("Tab")
 
-        print("[OK] Registration entered locally.")
+        print("[OK] Registration entered locally; the value will not be logged.")
 
-        # STEP 4: ENSURE POPUP IS CLOSED
+        # STEP 4: RESOLVE THE MATCHING REGISTERING AUTHORITY
         close_mobile_popup(page)
+        close_authentication_modes_notice(page)
+        select_rto_from_registration(page, registration)
 
-        # STEP 5: ACCEPT PRIVACY NOTICE
+        # STEP 5: GET THE APPLICANT'S CONSENT BEFORE ACCEPTING PORTAL TERMS.
+        print(
+            "\nReview the VAHAN privacy notice in the browser. "
+            "This consent must come from you, the applicant."
+        )
+        consent = input(
+            "Type YES if you accept the portal terms and authorize this lookup: "
+        ).strip()
+        if consent != "YES":
+            print("[STOP] Consent was not given; no lookup was started.")
+            return
+
+        # STEP 6: ACCEPT PRIVACY NOTICE
         accept_privacy_notice(page)
-
-        # STEP 6: CHECK FORM
-        print("\n=== HOMEPAGE STATUS ===")
-
-        print(
-            "Registration:",
-            registration_field.input_value()
-        )
-
-        print(
-            "Privacy accepted:",
-            page.locator(
-                "#homepageformid input[type='checkbox']"
-            ).first.is_checked()
-        )
-
-        print(
-            "State dropdown disabled:",
-            page.locator("#state_cd_input").is_disabled()
-        )
-
-        print(
-            "RTO dropdown disabled:",
-            page.locator("#fit_c_office_to_input").is_disabled()
-        )
 
         # STEP 7: PREPARE PROCEED BUTTON
         button = page.locator("#proccedHomeButtonId")
@@ -206,24 +327,7 @@ def main():
 
         print("[OK] Proceed button is unobstructed.")
 
-        # STEP 9: HUMAN REVIEW
-        confirm = input(
-            "\nReview the browser. Continue? (yes/no): "
-        ).strip().lower()
-
-        if confirm != "yes":
-            print("[STOP] Cancelled.")
-            return
-
-        final_confirm = input(
-            "\nProceed to the next VAHAN page? (yes/no): "
-        ).strip().lower()
-
-        if final_confirm != "yes":
-            print("[STOP] Navigation cancelled.")
-            return
-
-        # STEP 10: CLICK PROCEED
+        # STEP 8: START THE USER-AUTHORIZED LOOKUP
         button.click(timeout=15000)
 
         print("\n[INFO] Proceed clicked.")
@@ -232,36 +336,23 @@ def main():
         page.wait_for_timeout(5000)
 
         print("\n=== NEXT PAGE ===")
-        print("URL:", page.url)
         print("Title:", page.title())
 
-        # STEP 12: EXTRACT PAGE TEXT
-        print("\n=== PAGE CONTENT ===")
+        otp_fields = page.locator(
+            "input[autocomplete='one-time-code'], "
+            "input[id*='otp' i], input[name*='otp' i]"
+        )
+        if otp_fields.count():
+            print(
+                "\n[PAUSE] The portal is requesting authentication. "
+                "Complete sign-in and OTP directly in the browser."
+            )
 
-        page_text = page.locator("body").inner_text()
-
-        print(page_text[:7000])
-
-        # STEP 13: EXTRACT VISIBLE FORM FIELDS
-        print("\n=== VISIBLE FORM FIELDS ===")
-
-        fields = page.locator(
-            "input:visible, select:visible, textarea:visible"
-        ).evaluate_all("""
-            elements => elements.map(element => ({
-                tag: element.tagName,
-                type: element.type,
-                id: element.id,
-                name: element.name,
-                placeholder: element.placeholder,
-                disabled: element.disabled
-            }))
-        """)
-
-        for field in fields:
-            print(field)
-
-        input("\nPress ENTER to close browser...")
+        print(
+            "\nThe browser is open for you to review the portal state. "
+            "No application was submitted and no payment was made."
+        )
+        input("Press ENTER when you are ready to close the browser...")
 
     except KeyboardInterrupt:
         print("\n[STOP] Interrupted by user.")
@@ -270,6 +361,8 @@ def main():
         print(
             f"\n[ERROR] {type(error).__name__}: {error}"
         )
+        if observer.page is not None and not observer.page.is_closed():
+            input("Review the open browser, then press ENTER to close it...")
 
     finally:
         try:
