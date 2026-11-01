@@ -1,11 +1,11 @@
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 
 
 class AIUnderstandRequest(BaseModel):
     query: str = Field(
-        ...,
-        min_length=3,
+        default="",
+        min_length=0,
         description="Natural language request or statement from the citizen.",
         example="I am an undergraduate student looking for government scholarships."
     )

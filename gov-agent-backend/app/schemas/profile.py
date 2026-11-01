@@ -15,6 +15,7 @@ class CitizenProfileCreate(BaseModel):
     district: str = Field(..., example="Tiruchirappalli")
     annual_family_income: float = Field(..., example=180000.0)
     phone_number: str = Field(..., example="9876543210")
+    nationality: str = Field(default="Indian", example="Indian")
 
     # Occupation selector
     occupation_type: Literal["student", "worker", "unemployed", "other"] = Field(
@@ -65,6 +66,7 @@ class CitizenProfileResponse(BaseModel):
     district: str
     annual_family_income: float
     phone_number: str
+    nationality: str
     occupation_type: str
 
     # Student fields

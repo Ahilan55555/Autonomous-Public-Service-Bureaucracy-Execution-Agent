@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./gov_agent.db"
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 5
+    GEMINI_DISCOVERY_GROUNDING_ENABLED: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

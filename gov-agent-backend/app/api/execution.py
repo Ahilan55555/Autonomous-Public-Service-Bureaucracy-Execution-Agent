@@ -15,8 +15,17 @@ from app.models.user import User
 from app.models.profile import CitizenProfile
 from app.models.service import GovernmentService
 from app.models.document import CitizenDocument
+from app.models.execution import ExecutionTask
 from app.services.supabase_storage import supabase_storage
 from app.services.document_verifier import semantic_verifier
+from app.schemas.document import DocumentRequirementStatus
+from app.services.application_state import ApplicationState
+from app.schemas.execution import (
+    DispatchRequest,
+    ExecutionTaskResponse,
+    InterventionRequest,
+    WorkerCallbackRequest,
+)
 
 logger = logging.getLogger("agent.execution")
 router = APIRouter(prefix="/api/execution", tags=["Bureaucracy Execution Engine"])
@@ -41,6 +50,7 @@ class MatchedAttachment(BaseModel):
 
 
 class ExecutionManifestResponse(BaseModel):
+    execution_id: Optional[int] = None
     service_id: int
     service_name: str
     service_code: str
@@ -49,28 +59,61 @@ class ExecutionManifestResponse(BaseModel):
     ready_for_dispatch: bool
     missing_form_fields: List[str] = Field(default_factory=list)
     missing_documents: List[str] = Field(default_factory=list)
+    field_statuses: List[Dict[str, str]] = Field(default_factory=list)
+    document_statuses: List[DocumentRequirementStatus] = Field(default_factory=list)
+    workflow_state: str = "DRAFT"
     form_payload: Dict[str, Any] = Field(default_factory=dict)
     file_attachments: List[MatchedAttachment] = Field(default_factory=list)
 
 
-def _infer_fallback_fields(service_name: str, category: str) -> List[str]:
-    """Infers baseline mandatory fields if the database record has empty required_form_fields."""
+def _load_json_collection(value: Any) -> List[Any]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            logger.warning("[ExecutionDraft] Ignoring malformed stored requirement JSON.")
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
 
-    combined = f"{service_name} {category}".lower()
 
-    if any(k in combined for k in ["rc", "registration certificate", "vehicle"]):
-        return ["registration_number", "chassis_number", "engine_number", "reason_for_duplicate", "mobile_number"]
+def _requirement_names(raw_requirements: Any) -> tuple[List[str], Dict[str, str]]:
+    names: List[str] = []
+    classifications: Dict[str, str] = {}
+    for requirement in raw_requirements or []:
+        if isinstance(requirement, dict):
+            name = str(
+                requirement.get("name")
+                or requirement.get("field")
+                or requirement.get("document")
+                or ""
+            ).strip()
+            classification = str(
+                requirement.get("classification")
+                or requirement.get("status")
+                or "MANDATORY"
+            ).upper()
+        else:
+            name = str(requirement).strip()
+            classification = "MANDATORY"
+        if name:
+            names.append(name)
+            classifications[name] = classification
+    return names, classifications
 
-    elif any(k in combined for k in ["driving license", "dl", "licence"]):
-        return ["driving_license_number", "date_of_birth", "rto_office"]
 
-    elif any(k in combined for k in ["scholarship", "nsp", "student"]):
-        return ["bank_account_number", "bank_ifsc", "institution_code"]
-
-    elif any(k in combined for k in ["road", "pothole", "street light", "garbage", "drainage"]):
-        return ["exact_location", "landmark"]
-
-    return ["applicant_name", "contact_number"]
+def _mask_sensitive_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    masked = dict(payload)
+    for key, value in masked.items():
+        normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+        if any(token in normalized_key for token in ("aadhaar", "aadhar", "bankaccount", "accountnumber")):
+            text = str(value)
+            masked[key] = f"XXXX-XXXX-{text[-4:]}" if len(text) >= 4 else "XXXX"
+    return masked
 
 
 def _calculate_age(profile: Optional[CitizenProfile]) -> Optional[int]:
@@ -130,21 +173,17 @@ async def generate_execution_draft(
 
     # 3. Parse Stored Requirements
     raw_docs = getattr(service, "required_documents", "[]")
-    required_docs: List[str] = (
-        json.loads(raw_docs) if isinstance(raw_docs, str) else (raw_docs or [])
-    )
+    raw_required_docs: List[Any] = _load_json_collection(raw_docs)
+    required_docs, document_classifications = _requirement_names(raw_required_docs)
 
     raw_fields = getattr(service, "required_form_fields", "[]")
-    required_fields: List[str] = (
-        json.loads(raw_fields) if isinstance(raw_fields, str) else (raw_fields or [])
-    )
-
-    if not required_fields:
-        required_fields = _infer_fallback_fields(service.name, service.category)
+    raw_required_fields: List[Any] = _load_json_collection(raw_fields)
+    required_fields, field_classifications = _requirement_names(raw_required_fields)
 
     # 4. Semantic Document Verification & Signed URL Generation
     missing_docs: List[str] = []
     matched_attachments: List[MatchedAttachment] = []
+    document_statuses: List[DocumentRequirementStatus] = []
 
     if required_docs:
         try:
@@ -164,7 +203,7 @@ async def generate_execution_draft(
                         None
                     )
 
-                    if doc_obj:
+                    if doc_obj and doc_obj.storage_path and doc_obj.original_filename:
                         signed_url = supabase_storage.get_signed_url(
                             doc_obj.storage_path, 3600
                         )
@@ -176,11 +215,49 @@ async def generate_execution_draft(
                                 download_url=signed_url or ""
                             )
                         )
+                        document_statuses.append(DocumentRequirementStatus(
+                            requirement=match.required_document,
+                            classification=document_classifications.get(
+                                match.required_document, "MANDATORY"
+                            ),
+                            status="AVAILABLE",
+                            filename=doc_obj.original_filename
+                        ))
+                    elif doc_obj:
+                        document_statuses.append(DocumentRequirementStatus(
+                            requirement=match.required_document,
+                            classification=document_classifications.get(
+                                match.required_document, "MANDATORY"
+                            ),
+                            status="REQUIRES_VERIFICATION",
+                            filename=doc_obj.original_filename or None
+                        ))
                 else:
-                    missing_docs.append(match.required_document)
+                    classification = document_classifications.get(
+                        match.required_document, "MANDATORY"
+                    )
+                    if classification in {"MANDATORY", "CONDITIONALLY_REQUIRED"}:
+                        missing_docs.append(match.required_document)
+                    document_statuses.append(DocumentRequirementStatus(
+                        requirement=match.required_document,
+                        classification=classification,
+                        status="MISSING"
+                    ))
 
         else:
-            missing_docs = list(required_docs)
+            missing_docs = [
+                requirement for requirement in required_docs
+                if document_classifications.get(requirement, "MANDATORY")
+                in {"MANDATORY", "CONDITIONALLY_REQUIRED"}
+            ]
+            document_statuses = [
+                DocumentRequirementStatus(
+                    requirement=requirement,
+                    classification=document_classifications.get(requirement, "MANDATORY"),
+                    status="REQUIRES_VERIFICATION"
+                )
+                for requirement in required_docs
+            ]
 
     # 5. Build Combined Pool with All Baseline Profile Attributes
     dob_val = str(profile.dob).strip() if (profile and profile.dob) else ""
@@ -207,15 +284,16 @@ async def generate_execution_draft(
         "applicant_age": age_val if age_val is not None else "",
         "gender": profile.gender if (profile and profile.gender) else "",
         "applicant_gender": profile.gender if (profile and profile.gender) else "",
-        "state": profile.state if (profile and profile.state) else "Tamil Nadu",
-        "district": profile.district if (profile and profile.district) else "Tiruchirappalli",
+        "state": profile.state if (profile and profile.state) else "",
+        "district": profile.district if (profile and profile.district) else "",
         "phone_number": phone_val,
         "mobile_number": phone_val,
         "annual_family_income": income_val,
         "family_income": income_val,
         "annual_income": income_val,
         "income": income_val,
-        "occupation_type": profile.occupation_type if profile else "student",
+        "occupation_type": profile.occupation_type if profile else "",
+        "nationality": getattr(profile, "nationality", "") if profile else "",
     }
 
     if profile:
@@ -250,6 +328,7 @@ async def generate_execution_draft(
     # 6. Validate Required Form Fields Against Combined Pool with Semantic Aliasing
     missing_fields: List[str] = []
     final_form_payload: Dict[str, Any] = {}
+    field_statuses: List[Dict[str, str]] = []
     pool_normalized = {
         re.sub(r"[^a-z0-9]", "", key.lower()): value
         for key, value in combined_pool.items()
@@ -339,7 +418,21 @@ async def generate_execution_draft(
         if value is not None and str(value).strip() != "":
             final_form_payload[norm_key] = value
         else:
-            missing_fields.append(field_name)
+            classification = field_classifications.get(field_name, "MANDATORY")
+            if classification in {"MANDATORY", "CONDITIONALLY_REQUIRED"}:
+                missing_fields.append(field_name)
+            field_statuses.append({
+                "field": field_name,
+                "classification": classification,
+                "status": "MISSING"
+            })
+            continue
+
+        field_statuses.append({
+            "field": field_name,
+            "classification": field_classifications.get(field_name, "MANDATORY"),
+            "status": "AVAILABLE"
+        })
 
     # Retain all core identity & demographic attributes in final_form_payload
     core_keys = [
@@ -351,7 +444,8 @@ async def generate_execution_draft(
         "phone_number",
         "date_of_birth",
         "age",
-        "gender"
+        "gender",
+        "nationality"
     ]
 
     for core_key in core_keys:
@@ -367,7 +461,7 @@ async def generate_execution_draft(
 
     is_ready = (len(missing_docs) == 0 and len(missing_fields) == 0)
 
-    return ExecutionManifestResponse(
+    manifest = ExecutionManifestResponse(
         service_id=service.id,
         service_name=service.name,
         service_code=service.service_code,
@@ -376,6 +470,180 @@ async def generate_execution_draft(
         ready_for_dispatch=is_ready,
         missing_form_fields=missing_fields,
         missing_documents=missing_docs,
-        form_payload=final_form_payload,
+        field_statuses=field_statuses,
+        document_statuses=document_statuses,
+        workflow_state=(
+            ApplicationState.DRAFT.value
+            if not is_ready
+            else ApplicationState.DOCUMENT_VALIDATION.value
+        ),
+        form_payload=_mask_sensitive_payload(final_form_payload),
         file_attachments=matched_attachments
     )
+    task = ExecutionTask(
+        user_id=current_user.id,
+        service_id=service.id,
+        state=(
+            ApplicationState.READY_FOR_DISPATCH.value
+            if is_ready else ApplicationState.DRAFT.value
+        ),
+        ready_for_dispatch=is_ready,
+        manifest_json=json.dumps(manifest.model_dump(exclude={"execution_id"})),
+        form_payload_json=json.dumps(manifest.form_payload),
+        progress_percent=0,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    manifest.execution_id = task.id
+    return manifest
+
+
+def _task_response(task: ExecutionTask, service: GovernmentService) -> ExecutionTaskResponse:
+    return ExecutionTaskResponse(
+        execution_id=task.id,
+        service_id=task.service_id,
+        state=task.state,
+        progress_percent=task.progress_percent,
+        ready_for_dispatch=bool(task.ready_for_dispatch),
+        citizen_approved=bool(task.citizen_approved),
+        target_portal_url=service.portal_url,
+        blocker=task.blocker,
+        tracking_number=task.tracking_number,
+        last_error=task.last_error,
+        updated_at=task.updated_at,
+    )
+
+
+def _owned_task(
+    execution_id: int,
+    current_user: User,
+    db: Session,
+) -> tuple[ExecutionTask, GovernmentService]:
+    task = db.query(ExecutionTask).filter(
+        ExecutionTask.id == execution_id,
+        ExecutionTask.user_id == current_user.id,
+    ).first()
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Execution task not found."
+        )
+    service = db.query(GovernmentService).filter(
+        GovernmentService.id == task.service_id
+    ).first()
+    if not service:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Execution task references an unavailable service."
+        )
+    return task, service
+
+
+@router.post(
+    "/dispatch",
+    response_model=ExecutionTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Dispatch an approved execution task"
+)
+def dispatch_execution(
+    request: DispatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, service = _owned_task(request.execution_id, current_user, db)
+    if not task.ready_for_dispatch:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Execution task is not ready for dispatch."
+        )
+    if not request.citizen_approved:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="Explicit citizen approval is required before dispatch."
+        )
+
+    task.citizen_approved = True
+    task.state = ApplicationState.DISPATCHED.value
+    task.progress_percent = max(task.progress_percent, 1)
+    task.blocker = None
+    db.commit()
+    db.refresh(task)
+    return _task_response(task, service)
+
+
+@router.get(
+    "/status/{execution_id}",
+    response_model=ExecutionTaskResponse,
+    summary="Get execution task status"
+)
+def execution_status(
+    execution_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, service = _owned_task(execution_id, current_user, db)
+    return _task_response(task, service)
+
+
+@router.post(
+    "/intervene/{execution_id}",
+    response_model=ExecutionTaskResponse,
+    summary="Resume an execution task after citizen intervention"
+)
+def intervene_execution(
+    execution_id: int,
+    request: InterventionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, service = _owned_task(execution_id, current_user, db)
+    if task.state != ApplicationState.WAITING_FOR_CITIZEN_INTERVENTION.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This execution task is not waiting for intervention."
+        )
+    if not request.confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="The intervention must be explicitly confirmed."
+        )
+
+    task.state = ApplicationState.DISPATCHED.value
+    task.blocker = None
+    db.commit()
+    db.refresh(task)
+    return _task_response(task, service)
+
+
+@router.post(
+    "/callback/{execution_id}",
+    response_model=ExecutionTaskResponse,
+    summary="Receive a downstream execution worker callback"
+)
+def execution_callback(
+    execution_id: int,
+    request: WorkerCallbackRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, service = _owned_task(execution_id, current_user, db)
+    try:
+        requested_state = ApplicationState(request.state)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported execution state."
+        ) from exc
+
+    task.state = requested_state.value
+    task.progress_percent = request.progress_percent
+    task.blocker = request.blocker
+    task.last_error = request.error
+    task.tracking_number = request.tracking_number or task.tracking_number
+    task.submission_evidence = (
+        request.submission_evidence or task.submission_evidence
+    )
+    db.commit()
+    db.refresh(task)
+    return _task_response(task, service)

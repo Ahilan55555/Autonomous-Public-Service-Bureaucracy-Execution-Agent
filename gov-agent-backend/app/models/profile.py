@@ -16,6 +16,12 @@ class CitizenProfile(Base):
     district = Column(String(100), nullable=False)
     annual_family_income = Column(Float, nullable=False)
     phone_number = Column(String(20), nullable=False)
+    nationality = Column(
+        String(50),
+        nullable=False,
+        default="Indian",
+        server_default="Indian"
+    )
 
     # Occupation classifier: 'student' | 'worker' | 'unemployed' | 'other'
     occupation_type = Column(String(50), nullable=False, default="student")

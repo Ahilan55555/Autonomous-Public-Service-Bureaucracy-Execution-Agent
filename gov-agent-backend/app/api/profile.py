@@ -23,7 +23,11 @@ def create_profile(
             detail="Profile already exists for this user. Use PUT to update."
         )
 
-    profile = CitizenProfile(user_id=current_user.id, **profile_data.model_dump())
+    profile = CitizenProfile(
+        user_id=current_user.id,
+        **profile_data.model_dump(exclude={"nationality"}),
+        nationality="Indian"
+    )
     db.add(profile)
     db.commit()
     db.refresh(profile)

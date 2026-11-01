@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DocumentResponse(BaseModel):
@@ -32,15 +32,26 @@ class DocumentReadinessCheckResponse(BaseModel):
     is_ready_for_execution: bool
 
 
+class DocumentRequirementStatus(BaseModel):
+    requirement: str
+    classification: str = "MANDATORY"
+    status: str
+    filename: Optional[str] = None
+
+
 class DocumentMatchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     required_document: str = Field(description="The exact required document name from the scheme")
-    matched_uploaded_id: Optional[int] = Field(
-        default=None,
+    matched_uploaded_id: int = Field(
+        default=0,
         description="The ID of the user's document that satisfies this requirement, or None if missing"
     )
-    matched_filename: Optional[str] = Field(default=None, description="Filename of the matched document")
+    matched_filename: str = Field(default="", description="Filename of the matched document")
     confidence_reasoning: str = Field(description="Brief explanation of why this document matches or why it is missing")
 
 
 class SemanticReadinessResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     matches: List[DocumentMatchItem] = Field(default_factory=list)

@@ -1,5 +1,7 @@
 import json
 import uuid
+import os
+import re
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
@@ -17,6 +19,17 @@ from app.services.document_verifier import semantic_verifier
 from app.services.supabase_storage import supabase_storage
 
 router = APIRouter(prefix="/api/documents", tags=["Citizen Document Vault"])
+ALLOWED_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+MAX_DOCUMENT_SIZE_BYTES = 5 * 1024 * 1024
+
+
+def _has_valid_signature(content_type: str, file_bytes: bytes) -> bool:
+    signatures = {
+        "application/pdf": file_bytes.startswith(b"%PDF-"),
+        "image/jpeg": file_bytes.startswith(b"\xff\xd8\xff"),
+        "image/png": file_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+    }
+    return signatures.get(content_type, False)
 
 
 @router.post(
@@ -37,10 +50,29 @@ async def upload_document(
     file_bytes = await file.read()
     if len(file_bytes) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only PDF, JPEG, and PNG documents are supported."
+        )
+    if not _has_valid_signature(file.content_type, file_bytes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file content does not match its declared type."
+        )
+    if len(file_bytes) > MAX_DOCUMENT_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Document exceeds the 5 MB size limit."
+        )
 
     # Unique path inside the user's isolated folder in the private bucket
     unique_suffix = uuid.uuid4().hex[:8]
-    sanitized_filename = file.filename.replace(" ", "_")
+    sanitized_filename = re.sub(
+        r"[^A-Za-z0-9._-]",
+        "_",
+        os.path.basename(file.filename)
+    )
     storage_path = f"users/{current_user.id}/{unique_suffix}_{sanitized_filename}"
 
     # Stream to Supabase Storage
@@ -85,7 +117,10 @@ def list_documents(
 
     # Attach active signed download URLs
     for doc in user_docs:
-        doc.signed_url = supabase_storage.get_signed_url(doc.storage_path, 3600)
+        doc.signed_url = (
+            supabase_storage.get_signed_url(doc.storage_path, 3600)
+            if doc.storage_path else None
+        )
 
     return user_docs
 
@@ -100,11 +135,14 @@ async def check_document_readiness(
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found.")
 
-    required_docs_raw = (
-        json.loads(service.required_documents)
-        if isinstance(service.required_documents, str)
-        else (service.required_documents or [])
-    )
+    try:
+        required_docs_raw = (
+            json.loads(service.required_documents)
+            if isinstance(service.required_documents, str)
+            else (service.required_documents or [])
+        )
+    except (TypeError, ValueError):
+        required_docs_raw = []
 
     user_docs = db.query(CitizenDocument).filter(CitizenDocument.user_id == current_user.id).all()
 

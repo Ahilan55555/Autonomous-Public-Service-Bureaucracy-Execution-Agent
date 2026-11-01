@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine, SessionLocal
 
@@ -13,6 +14,21 @@ from app.api import documents
 from app.api import execution
 
 Base.metadata.create_all(bind=engine)
+
+profile_columns = {
+    column["name"]
+    for column in inspect(engine).get_columns("citizen_profiles")
+}
+if "nationality" not in profile_columns:
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE citizen_profiles "
+            "ADD COLUMN nationality VARCHAR(50) DEFAULT 'Indian'"
+        ))
+        connection.execute(text(
+            "UPDATE citizen_profiles SET nationality = 'Indian' "
+            "WHERE nationality IS NULL"
+        ))
 
 # Auto-seed the verified service records
 with SessionLocal() as db_session:

@@ -2,6 +2,7 @@ import logging
 from app.schemas.ai import ServiceIntentResponse
 from app.schemas.agent_pipeline import ServiceIntentResult
 from app.services.gemini_base import gemini_fast_client
+from app.services.privacy import redact_sensitive_text
 
 logger = logging.getLogger("agent.pipeline")
 
@@ -10,29 +11,37 @@ You are an expert Government Bureaucracy and Public Service AI Intent Classifier
 Analyze the citizen's query and extract their true public service intent.
 
 RULES:
-1. Accurately assign service_category (e.g. grievance, education, civic_infrastructure, social_welfare, agriculture, disaster_management).
-2. Determine specific service_name (e.g. flood_relief_subsidy, road_damage_complaint).
-3. Identify citizen's user_type and missing_information.
-4. Keep the summary concise and strictly factual.
+1. Accurately assign service_category, service_name, user_type, and required_action from the query.
+2. Keep the summary concise and useful to the citizen.
+3. Never return meta-commentary such as "automated intent extraction", "classification",
+   "the citizen asked", or a third-person analysis.
+4. For actionable requests, summarize the requested public service directly.
 
 CONVERSATIONAL & GREETING HANDLING:
 - If the citizen's query is a greeting, casual check-in, polite pleasantry, or meta-question
-  (e.g., "Hi", "How are you", "What can you do?"):
-  1. Set service_category to "general".
-  2. Set service_name to "general_inquiry".
-  3. Set required_action to "respond_to_greeting".
-  4. Set missing_information to [].
-  5. Phrase summary as a direct, first-person, friendly reply to the citizen, not a
-     third-person classification note. Acknowledge the message and ask how you can help
-     with public schemes, scholarships, licensing, or grievances.
+  or other non-actionable conversation:
+  - Do not invent a service or start scheme discovery.
+  - Phrase summary as a direct, first-person, friendly reply that acknowledges the
+    citizen and invites them to describe a public service, scheme, application, or grievance.
 """
 
 
 class GeminiService:
     async def understand_request(self, query: str) -> ServiceIntentResponse:
+        clean_query = redact_sensitive_text((query or "").strip())
+        if not clean_query:
+            return ServiceIntentResponse(
+                service_category="general",
+                service_name="general_inquiry",
+                user_type="citizen",
+                required_action="respond_to_greeting",
+                missing_information=[],
+                summary="Please describe the government service, scheme, application, or grievance you need help with."
+            )
+
         result: ServiceIntentResult = await gemini_fast_client.execute_structured_query(
             task_name="IntentExtraction",
-            prompt=f"Classify this citizen request: '{query}'",
+            prompt=clean_query,
             system_instruction=INTENT_SYSTEM_PROMPT,
             schema=ServiceIntentResult
         )
@@ -47,16 +56,15 @@ class GeminiService:
                 summary=result.summary
             )
 
-        # Dynamic fallback if all external models are unavailable
-        q = query.lower()
-        is_flood = "flood" in q or "rain" in q or "disaster" in q
+        # Keep failed extraction non-actionable so discovery never runs on an
+        # unclassified request.
         return ServiceIntentResponse(
-            service_category="social_welfare" if is_flood else "civic",
-            service_name="flood_relief_assistance" if is_flood else "general_service",
+            service_category="general",
+            service_name="general_inquiry",
             user_type="citizen",
-            required_action="apply_for_relief" if is_flood else "clarify_request",
-            missing_information=["exact_location", "extent_of_damage"],
-            summary=f"Automated intent extraction: {query}"
+            required_action="respond_to_greeting",
+            missing_information=[],
+            summary="I’m ready to help you find a government service, scheme, application, or grievance process."
         )
 
 
