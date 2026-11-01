@@ -1,4 +1,4 @@
-[12:55 am, 2/11/2026] Hari: ## 📌 Table of Contents
+Table of Contents
 
 - [Overview](#-overview)
 - [The Problem vs. The Solution](#-the-problem-vs-the-solution)
