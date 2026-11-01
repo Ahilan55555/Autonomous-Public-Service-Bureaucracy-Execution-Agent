@@ -12,13 +12,16 @@ class DecisionEngineError(Exception):
 
 class DecisionEngine:
 
-    def __init__(self, model="gemini-flash-lite-latest"):
-        api_key = os.getenv("GEMINI_API_KEY")
+    def __init__(self, model="gemini-flash-lite-latest", api_key=None):
 
-        if not api_key:
-            raise DecisionEngineError("GEMINI_API_KEY is not configured")
+        resolved_key = api_key or os.getenv("GEMINI_API_KEY")
 
-        self.client = genai.Client(api_key=api_key)
+        if not resolved_key:
+            raise DecisionEngineError(
+                "GEMINI_API_KEY is not configured"
+            )
+
+        self.client = genai.Client(api_key=resolved_key)
         self.model = model
 
     def decide(self, task, observation):
@@ -48,10 +51,6 @@ class DecisionEngine:
             return parse_model_response(response.text)
 
         except Exception as error:
-            try:
-                return parse_model_response(response.text)
-            except Exception as error:
-                raise DecisionEngineError(
-                    f"Model returned an invalid action: {error}. "
-                    f"Response received: {response.text[:1000]}"
-                ) from error
+            raise DecisionEngineError(
+                "Model returned an invalid action"
+            ) from error

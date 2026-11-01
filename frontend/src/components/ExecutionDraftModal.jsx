@@ -15,7 +15,7 @@ import {
   UserCheck,
   Send,
 } from "lucide-react";
-import { executionApi, applicationsApi } from "../api/services";
+import { executionApi, browserApi } from "../api/services";
 
 export default function ExecutionDraftModal({
   serviceId,
@@ -31,7 +31,7 @@ export default function ExecutionDraftModal({
   const [loading, setLoading] = useState(false);
   const [dispatching, setDispatching] = useState(false);
   const [manifest, setManifest] = useState(null);
-  const [dispatchedApp, setDispatchedApp] = useState(null);
+  const [browserResult, setBrowserResult] = useState(null);
   const [error, setError] = useState(null);
 
   if (!isOpen) return null;
@@ -54,7 +54,7 @@ export default function ExecutionDraftModal({
 
   function handleClose() {
     setManifest(null);
-    setDispatchedApp(null);
+    setBrowserResult(null);
     setDispatching(false);
     setError(null);
     setCitizenQuery("");
@@ -63,14 +63,41 @@ export default function ExecutionDraftModal({
   }
 
   async function handleDispatchApplication() {
-    if (!manifest) return;
+    if (!manifest || !manifest.ready_for_dispatch) return;
+
     setDispatching(true);
     setError(null);
+    setBrowserResult(null);
+
+    let sessionId = null;
+
     try {
-      const app = await applicationsApi.dispatchApplication(manifest);
-      setDispatchedApp(app);
-    } catch (e) {
-      setError(e.message || "Failed to record dispatched application.");
+      const session = await browserApi.createSession(manifest);
+      sessionId = session.session_id || session.sessionId;
+
+      if (!sessionId) {
+        throw new Error("No browser session ID returned.");
+      }
+
+      const observation = await browserApi.observeSession(sessionId);
+      const analysis = await browserApi.analyzeSession(sessionId);
+
+      setBrowserResult({
+        sessionId,
+        observation,
+        analysis,
+      });
+
+    } catch (err) {
+      setError(err.message || "Browser Agent failed.");
+
+      if (sessionId) {
+        try {
+          await browserApi.closeSession(sessionId);
+        } catch {
+          // Keep original error.
+        }
+      }
     } finally {
       setDispatching(false);
     }
@@ -523,131 +550,74 @@ export default function ExecutionDraftModal({
                 )}
               </div>
 
-              {/* Dispatch Action Button */}
+              {/* Browser Agent Integration */}
               {manifest.ready_for_dispatch && (
-                <div
-                  style={{
-                    padding: "16px",
-                    borderRadius: "12px",
-                    background: dispatchedApp ? "#e8fff0" : "#f0fdf4",
-                    border: `1px solid ${dispatchedApp ? "#86efac" : "#bbf7d0"}`,
-                    marginTop: "20px",
-                  }}
-                >
-                  {dispatchedApp ? (
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#166534", fontWeight: "800", fontSize: "14px" }}>
-                        <CheckCircle2 size={18} color="#16a34a" /> Application Genuinely Dispatched & Recorded!
-                      </div>
-                      <p style={{ fontSize: "13px", color: "#15803d", margin: "6px 0 12px" }}>
-                        Reference ID: <strong>{dispatchedApp.reference_number}</strong> &bull; Status: <strong>{dispatchedApp.status}</strong>
-                      </p>
-                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            handleClose();
-                            navigate("/my-applications");
-                          }}
-                          style={{
-                            padding: "9px 16px",
-                            borderRadius: "8px",
-                            background: "#166534",
-                            color: "#fff",
-                            border: "none",
-                            fontWeight: "750",
-                            fontSize: "12px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          View in My Applications
-                        </button>
-                        {manifest.portal_url && (
-                          <a
-                            href={manifest.portal_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              padding: "9px 16px",
-                              borderRadius: "8px",
-                              background: "#111",
-                              color: "#fff",
-                              fontWeight: "750",
-                              fontSize: "12px",
-                              textDecoration: "none",
-                            }}
-                          >
-                            Open Government Portal <ExternalLink size={13} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
+                <div style={{
+                  padding: "18px",
+                  marginTop: "20px",
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: "12px"
+                }}>
+                  <h3>Browser Agent Execution</h3>
+
+                  {!browserResult ? (
+                    <button
+                      type="button"
+                      onClick={handleDispatchApplication}
+                      disabled={dispatching}
+                      style={{
+                        background: "#166534",
+                        color: "white",
+                        border: "none",
+                        padding: "12px 20px",
+                        borderRadius: "8px",
+                        cursor: "pointer"
+                      }}
+                    >
+                      {dispatching
+                        ? "Starting Browser Agent..."
+                        : "Start Browser Agent & Analyze Portal"}
+                    </button>
                   ) : (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-                      <div>
-                        <div style={{ fontSize: "14px", fontWeight: "800", color: "#16803c" }}>
-                          Manifest Ready for Government Portal Dispatch
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#367c4b", marginTop: "2px" }}>
-                          Target: {manifest.portal_url || "Public Service Gateway"}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          onClick={handleDispatchApplication}
-                          disabled={dispatching}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "11px 18px",
-                            borderRadius: "8px",
-                            background: "#166534",
-                            color: "#fff",
-                            border: "none",
-                            fontSize: "13px",
-                            fontWeight: "800",
-                            cursor: dispatching ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          {dispatching ? (
-                            <>
-                              <RefreshCw size={14} className="spin-animation" />
-                              Dispatching Application...
-                            </>
-                          ) : (
-                            <>
-                              <Send size={14} />
-                              Confirm & Dispatch Application
-                            </>
-                          )}
-                        </button>
-                        {manifest.portal_url && (
-                          <a
-                            href={manifest.portal_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              padding: "11px 18px",
-                              borderRadius: "8px",
-                              background: "#111",
-                              color: "#fff",
-                              fontSize: "13px",
-                              fontWeight: "800",
-                              textDecoration: "none",
-                            }}
-                          >
-                            Open Portal <ExternalLink size={14} />
-                          </a>
-                        )}
-                      </div>
+                    <div>
+                      <h4>Browser Agent Connected</h4>
+
+                      <p>
+                        Session: {browserResult.sessionId}
+                      </p>
+
+                      <p>
+                        Gemini analysis completed.
+                        No browser action or government submission
+                        has been executed.
+                      </p>
+
+                      <pre style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                        background: "white",
+                        padding: "12px",
+                        borderRadius: "8px",
+                        maxHeight: "250px",
+                        overflow: "auto"
+                      }}>
+                        {JSON.stringify(browserResult.analysis, null, 2)}
+                      </pre>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await browserApi.closeSession(browserResult.sessionId);
+                            setBrowserResult(null);
+                          } catch (err) {
+                            setError(err.message || "Failed to close session.");
+                          }
+                        }}
+                      >
+                        Close Browser Session
+                      </button>
                     </div>
                   )}
                 </div>

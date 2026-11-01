@@ -11,6 +11,11 @@ from browser_agent.verification.error_recovery import (
 
 from browser_agent.state.task_manager import TaskManager
 
+from browser_agent.integration.mapping_executor import (
+    MappingExecutor,
+    MappingExecutionError,
+)
+
 
 class BrowserAgentError(Exception):
     pass
@@ -23,11 +28,15 @@ class BrowserAgent:
         allowed_domains,
         model="gemini-flash-lite-latest",
         value_provider=None,
-        allow_local_test_server=False
+        allow_local_test_server=False,
+        api_key=None
     ):
 
         self.observer = BrowserObserver(allowed_domains)
-        self.decision_engine = DecisionEngine(model=model)
+        self.decision_engine = DecisionEngine(
+            model=model,
+            api_key=api_key
+        )
 
         self.executor = None
 
@@ -35,6 +44,7 @@ class BrowserAgent:
         self.recovery = ErrorRecovery(max_retries=2)
         self.task_manager = TaskManager()
         self.value_provider = value_provider
+        self.mapping_executor = None
         self.pending_action = None
         self.pending_observation = None
         self.pending_url = None
@@ -49,6 +59,14 @@ class BrowserAgent:
             allowed_domains=self.observer.allowed_domains,
             value_provider=self.value_provider,
             allow_local_test_server=self.allow_local_test_server
+        )
+
+        # MappingExecutor only prepares trusted local fill actions.
+        # Final execution still goes through approve_pending_action().
+        self.mapping_executor = (
+            MappingExecutor(self.executor)
+            if self.value_provider is not None
+            else None
         )
 
     def navigate(self, url):
@@ -132,6 +150,15 @@ class BrowserAgent:
                 execution_result=result
             )
 
+        elif action["action"] == "fill":
+            verification = {
+                "status": (
+                    "success"
+                    if result.get("verified") is True
+                    else "failure"
+                )
+            }
+
         self.task_manager.record_action(
             action={"type": action["action"]},
             execution={"status": result.get("status")},
@@ -144,7 +171,6 @@ class BrowserAgent:
             "result": result,
             "verification": verification
         }
-
 
     def reject_pending_action(self):
 
@@ -416,7 +442,226 @@ class BrowserAgent:
             "results": step_results,
         }
 
+    def resume_task(self, max_steps=10):
+        """Continue an existing task after an approved action."""
+
+        if self.executor is None:
+            raise BrowserAgentError("Agent has not started")
+
+        if self.task_manager.current_task is None:
+            raise BrowserAgentError("No active task to resume")
+
+        if not isinstance(max_steps, int) or isinstance(max_steps, bool):
+            raise BrowserAgentError("max_steps must be an integer")
+
+        if not 1 <= max_steps <= 20:
+            raise BrowserAgentError("max_steps must be between 1 and 20")
+
+        if self.pending_action is not None:
+            raise BrowserAgentError(
+                "An action is still awaiting approval"
+            )
+
+        task = self.task_manager.current_task
+
+        if task["status"] != "running":
+            raise BrowserAgentError("Task is not in a resumable state")
+
+        # Do not continue if the last interaction still needs user input.
+        actions = task.get("actions", [])
+
+        if actions and actions[-1]["execution"].get("status") == \
+                "user_interaction_required":
+            raise BrowserAgentError(
+                "Resolve the pending user interaction before resuming"
+            )
+
+        task_description = task["description"]
+        task_id = task["task_id"]
+        step_results = []
+
+        for step_number in range(1, max_steps + 1):
+
+            try:
+                result = self.run_step(task_description)
+
+            except Exception:
+                self.task_manager.fail_task()
+
+                return {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "reason": "An unexpected agent error occurred",
+                    "steps_completed": len(step_results),
+                }
+
+            step_results.append(result)
+
+            if result.get("task_status") == "completed":
+                return {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            if result.get("task_status") == "awaiting_user":
+                return {
+                    "task_id": task_id,
+                    "status": "awaiting_user",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            if result.get("result", {}).get("status") == "failed":
+                self.task_manager.fail_task()
+
+                return {
+                    "task_id": task_id,
+                    "status": "failed",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+            verification = result.get("verification")
+
+            if verification and verification.get("status") == "uncertain":
+                return {
+                    "task_id": task_id,
+                    "status": "awaiting_user",
+                    "reason": "Action outcome could not be verified",
+                    "steps_completed": step_number,
+                    "results": step_results,
+                }
+
+        self.task_manager.mark_step_limit_reached()
+
+        return {
+            "task_id": task_id,
+            "status": "step_limit_reached",
+            "steps_completed": len(step_results),
+            "results": step_results,
+        }
+
+    def prepare_approved_mapping(self, mapping):
+        """
+        Validate an approved field mapping and stage its fill action.
+
+        This method does not fill the field. The caller must obtain the
+        user's browser-action approval by calling approve_pending_action().
+        """
+
+        if self.executor is None:
+            raise BrowserAgentError("Agent has not started")
+
+        if self.mapping_executor is None:
+            raise BrowserAgentError(
+                "Local value provider is not configured"
+            )
+
+        if self.pending_action is not None:
+            raise BrowserAgentError(
+                "Another browser action is already awaiting approval"
+            )
+
+        if not isinstance(mapping, dict):
+            raise BrowserAgentError("Invalid field mapping")
+
+        # MappingExecutor checks mapping approval and the provider's own
+        # approved-reference state. user_approved=False prevents execution.
+        try:
+            preparation = self.mapping_executor.execute_mapping(
+                mapping=mapping,
+                user_approved=False,
+            )
+
+        except MappingExecutionError as error:
+            raise BrowserAgentError(
+                "Field mapping could not be prepared"
+            ) from error
+
+        if preparation.get("status") != "awaiting_user_approval":
+            raise BrowserAgentError(
+                "Mapping did not enter the approval state"
+            )
+
+        request_field = mapping.get("request_field")
+        visible_field = mapping.get("visible_field")
+
+        # Build the value reference in trusted Python.
+        # Never accept it from the model-generated mapping.
+        value_reference = (
+            self.mapping_executor.mapping_adapter.FIELD_ALIASES.get(
+                request_field
+            )
+        )
+
+        if value_reference is None:
+            raise BrowserAgentError("Unsupported request field")
+
+        observation = self.observer.observe()
+
+        if not isinstance(observation, dict):
+            raise BrowserAgentError(
+                "Could not obtain a valid browser observation"
+            )
+
+        observed_fields = observation.get("input_fields", [])
+
+        if not isinstance(observed_fields, list):
+            raise BrowserAgentError(
+                "Invalid input fields in browser observation"
+            )
+
+        current_url = self.executor.page.url
+
+        if not current_url:
+            raise BrowserAgentError(
+                "Browser has no active page URL"
+            )
+
+        if not any(
+            isinstance(field, dict)
+            and field.get("field_ref") == visible_field
+            for field in observed_fields
+        ):
+            raise BrowserAgentError(
+                "Mapped browser field is not present in the current observation"
+            )
+
+        self.executor.register_observation(observation)
+
+        # Ensure the existing approval/audit lifecycle has an active task.
+        if self.task_manager.current_task is None:
+            self.start_task("Fill approved application form fields")
+
+        elif self.task_manager.current_task.get("status") != "running":
+            raise BrowserAgentError(
+                "Current task is not in a resumable state"
+            )
+
+        action = {
+            "action": "fill",
+            "target": visible_field,
+            "parameters": {
+                "value_ref": value_reference,
+            },
+            "reason": "Execute an approved field mapping",
+        }
+
+        self.pending_action = action
+        self.pending_observation = observation
+        self.pending_url = current_url
+
+        return {
+            "status": "awaiting_user_approval",
+            "action": "fill",
+            "request_field": request_field,
+            "field_ref": visible_field,
+        }
+
     def close(self):
 
         self.observer.close()
         self.executor = None
+        self.mapping_executor = None

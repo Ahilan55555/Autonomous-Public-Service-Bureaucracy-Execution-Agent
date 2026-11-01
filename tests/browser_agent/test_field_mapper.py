@@ -47,8 +47,17 @@ class FieldMapperTests(unittest.TestCase):
             ["registration_number", "full_name"],
             ["Registration Number", "Applicant Name"],
         )
-        self.assertEqual(len(result), 1)
-        self.assertTrue(result[0]["requires_human_approval"])
+        self.assertEqual(len(result["mappings"]), 1)
+
+        mapping = result["mappings"][0]
+
+        self.assertTrue(mapping["requires_human_approval"])
+        self.assertFalse(mapping["approved"])
+        self.assertEqual(mapping["request_field"], "full_name")
+
+        self.assertEqual(result["missing_required_fields"], ["registration_number"])
+        self.assertFalse(result["complete"])
+        self.assertTrue(result["requires_human_approval"])
 
     def test_unknown_request_field_rejected(self):
         with self.assertRaises(FieldMappingError):
@@ -82,6 +91,55 @@ class FieldMapperTests(unittest.TestCase):
                     "visible_field": "Applicant Name",
                     "confidence": 2,
                 }]},
+                ["full_name"],
+                ["Applicant Name"],
+            )
+
+    def test_low_confidence_mapping_rejected(self):
+        with self.assertRaises(FieldMappingError):
+            validate_mapping(
+                {
+                    "mappings": [{
+                        "request_field": "full_name",
+                        "visible_field": "Applicant Name",
+                        "confidence": 0.50,
+                    }]
+                },
+                ["full_name"],
+                ["Applicant Name"],
+            )
+
+    def test_duplicate_visible_field_rejected(self):
+        with self.assertRaises(FieldMappingError):
+            validate_mapping(
+                {
+                    "mappings": [
+                        {
+                            "request_field": "full_name",
+                            "visible_field": "Applicant Name",
+                            "confidence": 0.95,
+                        },
+                        {
+                            "request_field": "registration_number",
+                            "visible_field": "Applicant Name",
+                            "confidence": 0.90,
+                        },
+                    ]
+                },
+                ["full_name", "registration_number"],
+                ["Applicant Name"],
+            )
+
+    def test_boolean_confidence_rejected(self):
+        with self.assertRaises(FieldMappingError):
+            validate_mapping(
+                {
+                    "mappings": [{
+                        "request_field": "full_name",
+                        "visible_field": "Applicant Name",
+                        "confidence": True,
+                    }]
+                },
                 ["full_name"],
                 ["Applicant Name"],
             )

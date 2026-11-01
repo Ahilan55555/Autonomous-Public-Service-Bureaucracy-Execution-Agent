@@ -404,3 +404,44 @@ export const applicationsApi = {
   },
 };
 
+
+// ==========================================
+// 12. BROWSER AGENT INTEGRATION
+// ==========================================
+export const browserApi = {
+  async createSession(manifest) {
+    return apiClient("/api/browser/sessions", {
+      method: "POST",
+      body: { manifest },
+      requiresAuth: true,
+      timeoutMs: 60000,
+    });
+  },
+
+  async observeSession(sessionId) {
+    return apiClient(`/api/browser/sessions/${encodeURIComponent(sessionId)}/observe`, {
+      requiresAuth: true,
+    });
+  },
+
+  async getTask(sessionId) {
+    return apiClient(`/api/browser/sessions/${encodeURIComponent(sessionId)}/task`, {
+      requiresAuth: true,
+    });
+  },
+
+  async analyzeSession(sessionId) {
+    return apiClient(`/api/browser/sessions/${encodeURIComponent(sessionId)}/analyze`, {
+      method: "POST",
+      requiresAuth: true,
+      timeoutMs: 60000,
+    });
+  },
+
+  async closeSession(sessionId) {
+    return apiClient(`/api/browser/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      requiresAuth: true,
+    });
+  },
+};

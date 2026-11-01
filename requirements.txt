@@ -15,6 +15,7 @@ ament-package==0.16.5
 ament-pep257==0.17.4
 ament-uncrustify==0.17.4
 ament-xmllint==0.17.4
+bcrypt==4.0.1
 angles==1.16.1
 builtin-interfaces==2.0.3
 composition-interfaces==2.0.3

@@ -54,7 +54,13 @@ RULES:
 """
 
 
-def validate_mapping(response, expected_fields, visible_fields):
+def validate_mapping(
+    response,
+    expected_fields,
+    visible_fields,
+    required_fields=None,
+    min_confidence=0.80
+):
     if not isinstance(response, dict):
         raise FieldMappingError("Response must be a JSON object")
 
@@ -65,7 +71,20 @@ def validate_mapping(response, expected_fields, visible_fields):
 
     expected = set(expected_fields)
     visible = set(visible_fields)
-    used = set()
+    required = set(required_fields or expected)
+
+    if not required.issubset(expected):
+        raise FieldMappingError("Invalid required field configuration")
+
+    if (
+        isinstance(min_confidence, bool)
+        or not isinstance(min_confidence, (int, float))
+        or not 0 <= min_confidence <= 1
+    ):
+        raise FieldMappingError("Invalid confidence threshold")
+
+    used_requests = set()
+    used_visible = set()
     validated = []
 
     for item in mappings:
@@ -82,8 +101,11 @@ def validate_mapping(response, expected_fields, visible_fields):
         if visible_field not in visible:
             raise FieldMappingError("Unknown visible field reference")
 
-        if request_field in used:
+        if request_field in used_requests:
             raise FieldMappingError("Duplicate request field mapping")
+
+        if visible_field in used_visible:
+            raise FieldMappingError("Duplicate visible field mapping")
 
         if (
             isinstance(confidence, bool)
@@ -92,7 +114,11 @@ def validate_mapping(response, expected_fields, visible_fields):
         ):
             raise FieldMappingError("Invalid confidence")
 
-        used.add(request_field)
+        if confidence < min_confidence:
+            raise FieldMappingError("Mapping confidence too low")
+
+        used_requests.add(request_field)
+        used_visible.add(visible_field)
 
         validated.append({
             "request_field": request_field,
@@ -100,6 +126,14 @@ def validate_mapping(response, expected_fields, visible_fields):
             "confidence": float(confidence),
             "reason": str(item.get("reason", ""))[:300],
             "requires_human_approval": True,
+            "approved": False
         })
 
-    return validated
+    missing_required = sorted(required - used_requests)
+
+    return {
+        "mappings": validated,
+        "missing_required_fields": missing_required,
+        "complete": not missing_required,
+        "requires_human_approval": True
+    }

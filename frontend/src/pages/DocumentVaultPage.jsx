@@ -81,7 +81,7 @@ export default function DocumentVaultPage() {
     let isMounted = true;
     healthApi.checkHealth().then((res) => {
       if (isMounted) {
-        setBackendOnline(res.status === "ok");
+        setBackendOnline(res.status === "online");
       }
     });
 

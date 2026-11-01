@@ -58,6 +58,15 @@ class LocalValueProvider:
             raise ValueProviderError(
                 "Unsupported local value reference"
             )
+
+    def is_approved(self, reference):
+        """Check approval without exposing the actual private value."""
+        return (
+            isinstance(reference, str)
+            and reference in self.ALLOWED_REFERENCES
+            and reference in self._approved_references
+            and reference in self._values
+        )
     @classmethod
     def from_service_payload(cls, payload, approved_references=None):
         """
