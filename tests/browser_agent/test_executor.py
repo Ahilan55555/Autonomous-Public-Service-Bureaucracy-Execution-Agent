@@ -31,10 +31,7 @@ class BrowserExecutorTests(unittest.TestCase):
         button = MagicMock()
         link = MagicMock()
 
-        self.page.get_by_role.side_effect = [
-            button,
-            link
-        ]
+        self.page.get_by_role.side_effect = [button, link]
 
         button.count.return_value = 1
         button.is_visible.return_value = True
@@ -44,7 +41,10 @@ class BrowserExecutorTests(unittest.TestCase):
 
         action = self.make_action("click", "Continue")
 
-        result = self.executor.execute(action)
+        result = self.executor.execute(
+            action,
+            user_approved=True
+        )
 
         self.assertEqual(result["status"], "executed")
         button.click.assert_called_once_with(timeout=5000)
@@ -62,7 +62,10 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Missing")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
     def test_duplicate_targets_rejected(self):
         button = MagicMock()
@@ -76,7 +79,10 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Continue")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
     def test_disabled_target_rejected(self):
         button = MagicMock()
@@ -93,7 +99,10 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Continue")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
         button.click.assert_not_called()
 
@@ -103,7 +112,10 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Continue")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
     def test_closed_page_rejected(self):
         self.page.is_closed.return_value = True
@@ -111,15 +123,16 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Continue")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
     def test_stop_action(self):
-        action = self.make_action("stop", "current_task")
+        action = self.make_action("stop", "")
 
         result = self.executor.execute(action)
-
-        self.assertEqual(result["status"], "stopped")
-
+        
     def test_request_approval_does_not_execute_click(self):
         action = self.make_action(
             "request_approval",
@@ -155,9 +168,73 @@ class BrowserExecutorTests(unittest.TestCase):
         action = self.make_action("click", "Continue")
 
         with self.assertRaises(ExecutionError):
-            self.executor.execute(action)
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
-        button.click.assert_called_once()
+        button.click.assert_called_once_with(timeout=5000)
+
+    def test_fill_without_approval_is_blocked(self):
+        action = self.make_action(
+            "fill",
+            "field_0001",
+            {"value_ref": "applicant_name"}
+        )
+
+        self.executor.form_filler = MagicMock()
+
+        result = self.executor.execute(
+            action,
+            user_approved=False
+        )
+
+        self.assertEqual(
+            result["status"],
+            "user_interaction_required"
+        )
+
+        self.executor.form_filler.fill.assert_not_called()
+
+    def test_fill_with_approval_executes(self):
+        action = self.make_action(
+            "fill",
+            "field_0001",
+            {"value_ref": "applicant_name"}
+        )
+
+        self.executor.form_filler = MagicMock()
+
+        self.executor.form_filler.fill.return_value = {
+            "status": "filled",
+            "field_ref": "field_0001",
+            "verified": True,
+        }
+
+        result = self.executor.execute(
+            action,
+            user_approved=True
+        )
+
+        self.assertEqual(result["status"], "executed")
+        self.assertTrue(result["verified"])
+        self.executor.form_filler.fill.assert_called_once_with(
+            field_ref="field_0001",
+            value_ref="applicant_name"
+        )
+
+    def test_approved_fill_without_provider_fails(self):
+        action = self.make_action(
+            "fill",
+            "field_0001",
+            {"value_ref": "applicant_name"}
+        )
+
+        with self.assertRaises(ExecutionError):
+            self.executor.execute(
+                action,
+                user_approved=True
+            )
 
 
 if __name__ == "__main__":

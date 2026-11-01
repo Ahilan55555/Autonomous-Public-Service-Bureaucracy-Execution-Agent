@@ -1,0 +1,276 @@
+{
+    "timestamp": "2026-11-01T05:53:09.644662+00:00",
+    "target": "https://parivahan.gov.in",
+    "final_url": "https://parivahan.gov.in/",
+    "navigation_status": "navigated",
+    "dom_summary": {
+        "headings": 30,
+        "buttons": 2,
+        "links": 225,
+        "input_fields": 1
+    },
+    "classification_summary": {
+        "PUBLIC": 1,
+        "PERSONAL": 0,
+        "CONFIDENTIAL": 0,
+        "NEVER_SEND": 0
+    },
+    "blocked_navigation_attempts": 0,
+    "privacy_validation": "PASSED",
+    "sanitized_observation": {
+        "title": "Welcome! | Parivahansewa",
+        "headings": [
+            "Parivahan Front Page PopUp",
+            "\n         Driving License Related Services      ",
+            "   \n                           Online Test/ Appointment  \n                           \n                        ",
+            "\n                           Drivers/ Learners License                           \n                        ",
+            "\n                           Driving School                           \n                        ",
+            "\n                           Other Services                           \n                        ",
+            "Vehicle Related Services",
+            "Vehicle Registration",
+            "Fancy Number Allocation",
+            "National Permit",
+            "Other Services",
+            "Manufacturer Related Services",
+            " \n               Other  Products & Services            ",
+            "\n                           mParivahan                        ",
+            "\n                              PUCC                           ",
+            "\n                              eChallan System                           ",
+            "\n                              Vahan Green Sewa                           ",
+            "Dashboard and Reports",
+            "Vahan Dashboard",
+            "Sarathi Dashboard",
+            "VLTD Dashboard",
+            "Homologation Dashboard",
+            "Public Media   ",
+            "mParivahan",
+            "Informational Services",
+            "Terms and Policies",
+            "About",
+            "Resources",
+            "Need Help",
+            "visitor count"
+        ],
+        "buttons": [
+            {
+                "text": "",
+                "disabled": false
+            },
+            {
+                "text": "",
+                "disabled": false
+            }
+        ],
+        "links": [
+            {
+                "text": "Home",
+                "visible": true
+            },
+            {
+                "text": "Skip to navigation",
+                "visible": true
+            },
+            {
+                "text": "Screen Reader Access",
+                "visible": true
+            },
+            {
+                "text": "A-",
+                "visible": true
+            },
+            {
+                "text": "A",
+                "visible": true
+            },
+            {
+                "text": "A+",
+                "visible": true
+            },
+            {
+                "text": "A",
+                "visible": true
+            },
+            {
+                "text": "A",
+                "visible": true
+            },
+            {
+                "text": "\u0939\u093f\u0928\u094d\u0926\u0940",
+                "visible": true
+            },
+            {
+                "text": "https://vahan.parivahan.gov.in/mobileupdate/",
+                "visible": true
+            },
+            {
+                "text": "https://sarathi.parivahan.gov.in/sarathiservice/mobNumUpdpub.do",
+                "visible": true
+            },
+            {
+                "text": "click here",
+                "visible": true
+            },
+            {
+                "text": "1",
+                "visible": false
+            },
+            {
+                "text": "2",
+                "visible": false
+            },
+            {
+                "text": "3",
+                "visible": false
+            },
+            {
+                "text": "4",
+                "visible": false
+            },
+            {
+                "text": "5",
+                "visible": false
+            },
+            {
+                "text": "6",
+                "visible": false
+            },
+            {
+                "text": "7",
+                "visible": false
+            },
+            {
+                "text": "8",
+                "visible": false
+            },
+            {
+                "text": "9",
+                "visible": false
+            },
+            {
+                "text": "10",
+                "visible": false
+            },
+            {
+                "text": "11",
+                "visible": false
+            },
+            {
+                "text": "12",
+                "visible": false
+            },
+            {
+                "text": "Previous",
+                "visible": false
+            },
+            {
+                "text": "Next",
+                "visible": false
+            },
+            {
+                "text": "About Us",
+                "visible": true
+            },
+            {
+                "text": "Informational Services",
+                "visible": true
+            },
+            {
+                "text": "About Registration",
+                "visible": false
+            },
+            {
+                "text": "Change Of Address",
+                "visible": false
+            },
+            {
+                "text": "Diplomatic Vehicle",
+                "visible": false
+            },
+            {
+                "text": "Duplicate RC",
+                "visible": false
+            },
+            {
+                "text": "HP Endorsement",
+                "visible": false
+            },
+            {
+                "text": "HP Termination",
+                "visible": false
+            },
+            {
+                "text": "Issue Of Duplicate Trade Certificate",
+                "visible": false
+            },
+            {
+                "text": "No Objection Certificate",
+                "visible": false
+            },
+            {
+                "text": "Permanent Registration",
+                "visible": false
+            },
+            {
+                "text": "Reassignment Of Registration Mark",
+                "visible": false
+            },
+            {
+                "text": "Registration Display",
+                "visible": false
+            },
+            {
+                "text": "Renewal Of RC",
+                "visible": false
+            },
+            {
+                "text": "Temporary Registration",
+                "visible": false
+            },
+            {
+                "text": "Trade Certificate",
+                "visible": false
+            },
+            {
+                "text": "Transfer Of Ownership",
+                "visible": false
+            },
+            {
+                "text": "Notification & Advisories",
+                "visible": false
+            },
+            {
+                "text": "Advisory",
+                "visible": false
+            },
+            {
+                "text": "Draft Notification",
+                "visible": false
+            },
+            {
+                "text": "Final Notification",
+                "visible": false
+            },
+            {
+                "text": "About Driving License",
+                "visible": false
+            },
+            {
+                "text": "Addition Of Class",
+                "visible": false
+            },
+            {
+                "text": "Duplicate Licence",
+                "visible": false
+            }
+        ],
+        "input_fields": [
+            {
+                "field_ref": "field_0001",
+                "category": "PUBLIC",
+                "type": "text",
+                "required": false,
+                "disabled": false
+            }
+        ]
+    }
+}

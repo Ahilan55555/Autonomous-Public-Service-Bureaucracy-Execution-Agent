@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -7,104 +8,136 @@ sys.path.insert(0, str(ROOT))
 from browser_agent.perception.observer import BrowserObserver
 from browser_agent.execution.executor import BrowserExecutor
 from browser_agent.execution.value_provider import LocalValueProvider
-from browser_agent.intelligence.decision_engine import DecisionEngine
+from browser_agent.execution.field_matcher import match_fields
+
+
+def load_service():
+    path = ROOT / "data" / "service_request.json"
+
+    with open(path, "r", encoding="utf-8") as file:
+        service = json.load(file)
+
+    if not isinstance(service, dict):
+        raise ValueError("Invalid service request")
+
+    if not isinstance(service.get("form_payload"), dict):
+        raise ValueError("Missing form payload")
+
+    if service.get("missing_form_fields"):
+        raise ValueError("Service has missing required form fields")
+
+    return service
 
 
 def main():
+
     observer = BrowserObserver(
         allowed_domains=["example.com"]
     )
 
     try:
-        print("\nStarting Chromium...")
-        page = observer.start()
+        # 1. Load service data.
+        service = load_service()
+        form_data = service["form_payload"]
 
+        print("\nService:", service["service_name"])
+        print("Loading", len(form_data), "local fields...")
+
+        # 2. Launch browser.
+        page = observer.start()
         observer.navigate("https://example.com")
 
-        # Local demo form. No real personal information.
+        # 3. Create controlled demonstration form.
         page.set_content("""
         <!DOCTYPE html>
         <html>
-        <head>
-            <title>Public Service Application Demo</title>
-        </head>
         <body>
-            <h1>Public Service Application</h1>
+            <h1>Duplicate RC Application</h1>
 
             <form>
-                <label for="name">Applicant Name</label>
-                <input id="name" type="text">
+                <label for="full_name">Full Name</label>
+                <input id="full_name" name="full_name" type="text">
 
-                <label for="email">Email</label>
-                <input id="email" type="email">
+                <label for="email">Email Address</label>
+                <input id="email" name="email" type="email">
 
-                <label for="password">Password</label>
-                <input id="password" type="password">
+                <label for="registration_number">Registration Number</label>
+                <input id="registration_number" name="registration_number" type="text">
+
+                <label for="chassis_number">Chassis Number</label>
+                <input id="chassis_number" name="chassis_number" type="text">
+
+                <label for="engine_number">Engine Number</label>
+                <input id="engine_number" name="engine_number" type="text">
+
+                <label for="mobile_number">Mobile Number</label>
+                <input id="mobile_number" name="mobile_number" type="tel">
+
+                <label for="state">State</label>
+                <input id="state" name="state" type="text">
+
+                <label for="district">District</label>
+                <input id="district" name="district" type="text">
+
+                <label for="reason_for_duplicate">Reason for Duplicate</label>
+                <input id="reason_for_duplicate" name="reason_for_duplicate" type="text">
+
+                <label for="grievance_description">Grievance Description</label>
+                <textarea id="grievance_description" name="grievance_description"></textarea>
+
+                <button type="submit">Submit Application</button>
             </form>
         </body>
         </html>
         """)
 
-        # 1. Observe browser state.
-        print("\nObserving webpage...")
+        # 4. Observe browser.
         observation = observer.observe()
 
-        for field in observation["input_fields"]:
-            print({
-                "field_ref": field["field_ref"],
-                "type": field["type"]
-            })
-
-        # 2. Ask Gemini to propose an action.
-        print("\nSending sanitized observation to Gemini...")
-
-        decision_engine = DecisionEngine()
-
-        task = (
-            "Fill field_0001 using the applicant_name value reference. "
-            "Do not interact with any other field. "
-            "Return a valid fill action."
+        # 5. Match browser fields with local references.
+        matches = match_fields(
+            observation,
+            set(form_data.keys())
         )
 
-        action = decision_engine.decide(
-            task=task,
-            observation=observation
-        )
+        print("\nProposed field mappings:")
 
-        # 3. Apply strict demo-specific action restrictions.
-        if (
-            action["action"] != "fill"
-            or action["target"] != "field_0001"
-            or action["parameters"].get("value_ref") != "applicant_name"
-        ):
-            print("\nGemini proposed an action outside demo permissions.")
-            print("Action rejected.")
+        for match in matches:
+            print(
+                match["field_ref"],
+                "<--",
+                match["value_ref"]
+            )
+
+        if not matches:
+            print("No matching fields found.")
             return
 
-        print("\nGemini proposed:")
-        print({
-            "action": action["action"],
-            "target": action["target"],
-            "value_ref": action["parameters"]["value_ref"]
-        })
+        unmatched = set(form_data.keys()) - {
+            match["value_ref"] for match in matches
+        }
 
-        # 4. Wait for explicit user approval.
+        print("\nMatched fields:", len(matches))
+        print("Unmatched fields:", len(unmatched))
+
+        # 6. Show mappings and request approval.
         approval = input(
-            "\nApprove this exact operation? (yes/no): "
+            "\nApprove filling these fields? (yes/no): "
         ).strip().lower()
 
         if approval != "yes":
             print("Operation cancelled.")
             return
 
-        # 5. Configure local values only after approval.
-        provider = LocalValueProvider(
-            values={
-                "applicant_name": "Demo Applicant"
-            },
-            approved_references={"applicant_name"}
+        # 7. Create local provider.
+        provider = LocalValueProvider.from_service_payload(
+            service,
+            approved_references={
+                match["value_ref"] for match in matches
+            }
         )
 
+        # 8. Configure executor.
         executor = BrowserExecutor(
             page=page,
             allowed_domains=["example.com"],
@@ -113,24 +146,66 @@ def main():
 
         executor.register_observation(observation)
 
-        # 6. Execute through the authorization layer.
-        result = executor.execute(
-            action,
-            user_approved=True
+        # 9. Execute each approved field.
+        results = []
+
+        for match in matches:
+
+            action = {
+                "action": "fill",
+                "target": match["field_ref"],
+                "parameters": {
+                    "value_ref": match["value_ref"]
+                },
+                "reason": "Fill approved service form field"
+            }
+
+            try:
+                result = executor.execute(
+                    action,
+                    user_approved=True
+                )
+
+                results.append({
+                    "field_ref": match["field_ref"],
+                    "value_ref": match["value_ref"],
+                    "success": (
+                        result.get("status") == "executed"
+                        and result.get("verified") is True
+                    )
+                })
+
+            except Exception:
+                results.append({
+                    "field_ref": match["field_ref"],
+                    "value_ref": match["value_ref"],
+                    "success": False
+                })
+
+        # 10. Report results without exposing actual values.
+        print("\nExecution results:")
+
+        for result in results:
+            print({
+                "field_ref": result["field_ref"],
+                "value_ref": result["value_ref"],
+                "success": result["success"]
+            })
+
+        successful = sum(
+            result["success"] for result in results
         )
 
-        print("\nExecution result:")
-        print(result)
-
-        # 7. Verify locally. Never send the actual value to Gemini.
-        verified = (
-            result.get("status") == "executed"
-            and page.locator("#name").input_value()
-            == "Demo Applicant"
+        print(
+            f"\nVerified fields: {successful}/{len(matches)}"
         )
 
-        print("\nVerification:")
-        print("Field filled correctly:", verified)
+        if successful == len(matches):
+            print("SUCCESS: All matched fields were filled and verified.")
+        else:
+            print("PARTIAL SUCCESS: Some fields need investigation.")
+
+        print("\nSubmission was NOT performed.")
 
         input("\nPress ENTER to close Chromium...")
 

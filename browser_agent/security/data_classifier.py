@@ -30,6 +30,16 @@ CONFIDENTIAL_KEYWORDS = {
     "debit_card",
     "identity_number",
     "national_id",
+    "registration_number",
+    "vehicle_number",
+    "vehicle_registration",
+    "chassis_number",
+    "engine_number",
+    "driving_license",
+    "driving_licence",
+    "license_number",
+    "licence_number",
+    "rc_number",
 }
 
 # Personal information

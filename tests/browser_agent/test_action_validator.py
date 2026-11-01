@@ -64,13 +64,22 @@ class ActionValidatorTests(unittest.TestCase):
     def test_allowed_click(self):
         action = self.make_action("click", "Continue")
 
+        with self.assertRaises(ApprovalRequiredError):
+            authorize_action(
+                action,
+                self.allowed_domains,
+                current_url=self.current_url
+            )
+
         result = authorize_action(
             action,
             self.allowed_domains,
-            current_url=self.current_url
+            current_url=self.current_url,
+            user_approved=True
         )
 
         self.assertTrue(result["allowed"])
+        self.assertTrue(result["requires_approval"])
 
     def test_click_on_unapproved_page_rejected(self):
         action = self.make_action("click", "Continue")
@@ -119,7 +128,21 @@ class ActionValidatorTests(unittest.TestCase):
                 current_url=self.current_url
             )
 
-    def test_normal_fill_reference_allowed(self):
+    def test_fill_requires_user_approval(self):
+        action = self.make_action(
+            "fill",
+            "Full Name",
+            {"value_ref": "user.full_name"}
+        )
+
+        with self.assertRaises(ApprovalRequiredError):
+            authorize_action(
+                action,
+                self.allowed_domains,
+                current_url=self.current_url
+            )
+
+    def test_fill_allowed_after_approval(self):
         action = self.make_action(
             "fill",
             "Full Name",
@@ -129,8 +152,12 @@ class ActionValidatorTests(unittest.TestCase):
         result = authorize_action(
             action,
             self.allowed_domains,
-            current_url=self.current_url
+            current_url=self.current_url,
+            user_approved=True
         )
+
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["requires_approval"])
 
         self.assertTrue(result["allowed"])
 

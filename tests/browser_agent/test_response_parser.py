@@ -26,7 +26,7 @@ class TestResponseParser(unittest.TestCase):
         raw = """
         {
             "action": "stop",
-            "target": "current_task",
+            "target": "",
             "parameters": {},
             "reason": "Task completed"
         }
@@ -92,6 +92,20 @@ class TestResponseParser(unittest.TestCase):
         with self.assertRaises(ResponseParsingError):
             parse_model_response(raw)
 
+    def test_valid_stop_action_with_empty_target(self):
+        raw = """
+        {
+            "action": "stop",
+            "target": "",
+            "parameters": {},
+            "reason": "No safe navigation target is available."
+        }
+        """
+
+        result = parse_model_response(raw)
+
+        self.assertEqual(result["action"], "stop")
+        self.assertEqual(result["target"], "")
 
 if __name__ == "__main__":
     unittest.main()

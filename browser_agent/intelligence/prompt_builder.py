@@ -44,12 +44,25 @@ SECURITY RULES:
 10. If information is insufficient, request user input or stop.
 
 ALLOWED ACTIONS:
-
 - click
-- fill
-- request_user_input
-- request_approval
 - stop
+
+For this demo:
+- Use click only for a clearly identified, visible navigation button or link.
+- Use stop if no suitable navigation target can be identified.
+- Never use fill, navigate, wait, or submit.
+- Initial navigation is controlled by Python.
+
+ACTION PARAMETERS:
+- click: {}
+- stop: {}
+
+TARGET RULES:
+- For click, target must be the exact visible accessible name of one button or link.
+- Never return an empty target.
+- Never invent a target that is not present in the observation.
+- If the target is ambiguous or unavailable, use stop with an empty target.
+
 
 OUTPUT REQUIREMENTS:
 

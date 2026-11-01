@@ -49,9 +49,7 @@ def validate_action(action_data):
     """
 
     if not isinstance(action_data, dict):
-        raise SchemaValidationError(
-            "Action must be a dictionary"
-        )
+        raise SchemaValidationError("Action must be a dictionary")
 
     expected_keys = {
         "action",
@@ -65,6 +63,7 @@ def validate_action(action_data):
             "Unexpected or missing action fields"
         )
 
+    # 1. Validate action name
     action = action_data["action"]
 
     if not isinstance(action, str):
@@ -79,18 +78,35 @@ def validate_action(action_data):
             f"Unsupported action: {action}"
         )
 
-    target = _validate_string(
-        action_data["target"],
-        "target",
-        MAX_TARGET_LENGTH
-    )
+    # 2. Validate target
+    raw_target = action_data["target"]
 
+    if not isinstance(raw_target, str):
+        raise SchemaValidationError(
+            "target must be a string"
+        )
+
+    if action == "stop":
+        if raw_target != "":
+            raise SchemaValidationError(
+                "stop action must have an empty target"
+            )
+        target = ""
+    else:
+        target = _validate_string(
+            raw_target,
+            "target",
+            MAX_TARGET_LENGTH
+        )
+
+    # 3. Validate reason
     reason = _validate_string(
         action_data["reason"],
         "reason",
         MAX_REASON_LENGTH
     )
 
+    # 4. Validate parameters
     parameters = action_data["parameters"]
 
     if not isinstance(parameters, dict):
@@ -98,7 +114,7 @@ def validate_action(action_data):
             "Parameters must be a dictionary"
         )
 
-    # Action-specific parameter validation.
+    # 5. Action-specific parameter validation
     if action in {
         "navigate",
         "click",
@@ -127,7 +143,6 @@ def validate_action(action_data):
             MAX_REFERENCE_LENGTH
         )
 
-        # Prevent arbitrary expressions or code-like references.
         import re
 
         if not re.fullmatch(
@@ -151,7 +166,6 @@ def validate_action(action_data):
 
         timeout_ms = parameters["timeout_ms"]
 
-        # bool is a subclass of int in Python, so reject it explicitly.
         if isinstance(timeout_ms, bool) or not isinstance(
             timeout_ms, int
         ):

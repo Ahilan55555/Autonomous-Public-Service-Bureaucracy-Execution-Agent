@@ -48,6 +48,10 @@ class DecisionEngine:
             return parse_model_response(response.text)
 
         except Exception as error:
-            raise DecisionEngineError(
-                "Model returned an invalid action"
-            ) from error
+            try:
+                return parse_model_response(response.text)
+            except Exception as error:
+                raise DecisionEngineError(
+                    f"Model returned an invalid action: {error}. "
+                    f"Response received: {response.text[:1000]}"
+                ) from error

@@ -99,6 +99,27 @@ class SecurityTests(unittest.TestCase):
             "PUBLIC"
         )
 
+    def test_vehicle_identifiers_are_confidential(self):
+        fields = [
+            {"name": "registration_number"},
+            {"name": "vehicle_number"},
+            {"name": "vehicle_registration"},
+            {"name": "chassis_number"},
+            {"name": "engine_number"},
+            {"name": "driving_license"},
+            {"name": "driving_licence"},
+            {"name": "license_number"},
+            {"name": "licence_number"},
+            {"name": "rc_number"},
+        ]
+
+        for field in fields:
+            with self.subTest(field=field):
+                self.assertEqual(
+                    classify_field(field),
+                    "CONFIDENTIAL"
+                )
+
     def test_username_is_not_misclassified_as_personal_name(self):
         self.assertEqual(
             classify_field({"type": "text", "name": "username"}),
