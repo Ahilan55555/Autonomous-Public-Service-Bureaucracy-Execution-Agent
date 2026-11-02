@@ -1,0 +1,28 @@
+
+# FastAPI
+fastapi
+uvicorn[standard]
+
+# Configuration and validation
+pydantic-settings
+python-dotenv
+email-validator
+python-multipart
+
+# Database
+SQLAlchemy
+supabase
+psycopg[binary]
+
+# Authentication
+bcrypt==4.0.1
+passlib[bcrypt]
+python-jose[cryptography]
+
+# AI providers
+groq
+google-genai
+
+# HTTP
+httpx
+requests
